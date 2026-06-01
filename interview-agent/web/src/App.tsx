@@ -9,6 +9,32 @@ interface Message {
   streaming?: boolean;
 }
 
+const AUTH_SESSION_KEY = 'interviewlg_active_session';
+
+function hasActiveBrowserSession(): boolean {
+  try {
+    return sessionStorage.getItem(AUTH_SESSION_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markActiveBrowserSession(): void {
+  try {
+    sessionStorage.setItem(AUTH_SESSION_KEY, '1');
+  } catch {
+    // Storage may be unavailable in restricted browser modes; login still works for the current render.
+  }
+}
+
+function clearActiveBrowserSession(): void {
+  try {
+    sessionStorage.removeItem(AUTH_SESSION_KEY);
+  } catch {
+    // Ignore storage failures and continue clearing server-side auth state.
+  }
+}
+
 const DIFFICULTY_OPTIONS = [
   { value: 'junior', label: '初级', meta: '实习至 1 年经验', description: '侧重基础概念、常见业务实现、代码可读性与排错思路。' },
   { value: 'mid', label: '中级', meta: '1 至 3 年经验', description: '加入工程实践、模块设计、性能取舍和线上问题处理。' },
@@ -647,34 +673,43 @@ function LoadingView() {
 }
 
 function App() {
-  const [view, setView] = useState<View>('loading');
+  const [view, setView] = useState<View>(() => (hasActiveBrowserSession() ? 'loading' : 'login'));
   const [sessionId, setSessionId] = useState('');
   const [domain, setDomain] = useState('');
   const [difficulty, setDifficulty] = useState('');
   const [username, setUsername] = useState('');
 
   useEffect(() => {
+    if (!hasActiveBrowserSession()) {
+      void logout().catch(() => undefined);
+      return;
+    }
+
     void getMe()
       .then((me) => {
         if (me) {
           setUsername(me.username);
           setView('setup');
         } else {
+          clearActiveBrowserSession();
           setView('login');
         }
       })
       .catch(() => {
+        clearActiveBrowserSession();
         setView('login');
       });
   }, []);
 
   const handleLogin = (user: string) => {
+    markActiveBrowserSession();
     setUsername(user);
     setView('setup');
   };
 
   const handleLogout = async () => {
-    await logout();
+    clearActiveBrowserSession();
+    await logout().catch(() => undefined);
     setUsername('');
     setView('login');
   };
