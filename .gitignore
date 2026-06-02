@@ -32,3 +32,5 @@ htmlcov/
 
 # codex
 .codex
+
+rag-data-pipeline
