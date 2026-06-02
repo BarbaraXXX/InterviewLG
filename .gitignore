@@ -33,4 +33,6 @@ htmlcov/
 # codex
 .codex
 
-rag-data-pipeline
+# rag-data-pipeline
+rag-data-pipeline/.env
+rag-data-pipeline/data/

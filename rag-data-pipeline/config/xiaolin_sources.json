@@ -1,0 +1,96 @@
+{
+  "sources": [
+    {
+      "id": "xiaolin_interview_index",
+      "url": "https://www.xiaolincoding.com/interview/",
+      "adapter": "xiaolin",
+      "extract": false,
+      "domain": ["interview"],
+      "tags": ["xiaolincoding", "interview-index"]
+    },
+    {
+      "id": "xiaolin_java_interview",
+      "url": "https://www.xiaolincoding.com/interview/java.html",
+      "adapter": "xiaolin",
+      "domain": ["backend", "java"],
+      "tags": ["xiaolincoding", "java"]
+    },
+    {
+      "id": "xiaolin_golang_interview",
+      "url": "https://www.xiaolincoding.com/interview/golang.html",
+      "adapter": "xiaolin",
+      "domain": ["backend", "go"],
+      "tags": ["xiaolincoding", "golang"]
+    },
+    {
+      "id": "xiaolin_cpp_interview",
+      "url": "https://www.xiaolincoding.com/interview/cpp.html",
+      "adapter": "xiaolin",
+      "domain": ["cpp"],
+      "tags": ["xiaolincoding", "cpp"]
+    },
+    {
+      "id": "xiaolin_mysql_interview",
+      "url": "https://www.xiaolincoding.com/interview/mysql.html",
+      "adapter": "xiaolin",
+      "domain": ["backend", "database", "mysql"],
+      "tags": ["xiaolincoding", "mysql", "database"]
+    },
+    {
+      "id": "xiaolin_redis_interview",
+      "url": "https://www.xiaolincoding.com/interview/redis.html",
+      "adapter": "xiaolin",
+      "domain": ["backend", "redis"],
+      "tags": ["xiaolincoding", "redis"]
+    },
+    {
+      "id": "xiaolin_network_interview",
+      "url": "https://www.xiaolincoding.com/interview/network.html",
+      "adapter": "xiaolin",
+      "domain": ["backend", "network"],
+      "tags": ["xiaolincoding", "network"]
+    },
+    {
+      "id": "xiaolin_algorithm_interview",
+      "url": "https://www.xiaolincoding.com/interview/algorithms.html",
+      "adapter": "xiaolin",
+      "domain": ["algorithm"],
+      "tags": ["xiaolincoding", "algorithm"]
+    },
+    {
+      "id": "xiaolin_agent_interview_overview",
+      "url": "https://www.xiaolincoding.com/project/xiaolinnote.html",
+      "adapter": "xiaolin",
+      "extract": false,
+      "domain": ["agent", "rag", "llm"],
+      "tags": ["xiaolincoding", "agent", "rag", "llm", "ai-application"]
+    },
+    {
+      "id": "xiaolinnote_ai_interview",
+      "url": "https://xiaolinnote.com/ai",
+      "adapter": "xiaolin",
+      "extract": false,
+      "discover_prefixes": ["/ai/agent/", "/ai/rag/"],
+      "domain": ["agent", "rag", "llm"],
+      "tags": ["xiaolinnote", "agent", "rag", "llm", "ai-application"]
+    },
+    {
+      "id": "xiaolinnote_tools_interview",
+      "url": "https://xiaolinnote.com/ai/tools/tools_info.html",
+      "adapter": "xiaolin",
+      "extract": false,
+      "discover_prefixes": ["/ai/tools/"],
+      "domain": ["agent", "llm-tools"],
+      "tags": ["xiaolinnote", "agent", "tools", "mcp", "function-calling"]
+    },
+    {
+      "id": "xiaolinnote_llm_engineering_interview",
+      "url": "https://xiaolinnote.com/ai/llm/llm_info.html",
+      "adapter": "xiaolin",
+      "extract": false,
+      "discover_prefixes": ["/ai/llm/"],
+      "domain": ["llm"],
+      "tags": ["xiaolinnote", "llm", "engineering"]
+    }
+  ]
+}

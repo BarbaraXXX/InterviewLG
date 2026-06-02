@@ -742,8 +742,17 @@ function App() {
       {view === 'setup' && <SetupView onStart={handleStart} username={username} onLogout={handleLogout} />}
       {view === 'chat' && <ChatView sessionId={sessionId} domain={domain} difficulty={difficulty} onEnd={handleEnd} />}
       <footer className="site-footer">
-        <a href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">
+        <a className="beian-link" href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">
           浙ICP备2026035635号
+        </a>
+        <a
+          className="beian-link police-beian"
+          href="https://beian.mps.gov.cn/#/query/webSearch?code=33019202003045"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          <img src="/beian-police.png" alt="" aria-hidden="true" />
+          <span>浙公网安备33019202003045号</span>
         </a>
       </footer>
     </>
