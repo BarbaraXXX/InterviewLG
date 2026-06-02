@@ -527,6 +527,7 @@ function ChatView({
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -572,6 +573,10 @@ function ChatView({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    const nativeEvent = e.nativeEvent as KeyboardEvent;
+    if (isComposing || nativeEvent.isComposing || nativeEvent.keyCode === 229) {
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -631,6 +636,8 @@ function ChatView({
           className="chat-input"
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onCompositionStart={() => setIsComposing(true)}
+          onCompositionEnd={() => setIsComposing(false)}
           onKeyDown={handleKeyDown}
           placeholder="输入你的回答..."
           rows={1}
