@@ -1,6 +1,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from interview_agent import server as server_module
 from interview_agent.auth import get_current_user
@@ -150,3 +151,61 @@ def test_format_profile_full():
 
 def test_format_profile_empty():
     assert server_module._format_profile({}) == ""
+
+
+class FakeStreamAgent:
+    def __init__(self):
+        self.last_messages = None
+
+    async def astream_events(self, payload, version):
+        self.last_messages = payload["messages"]
+        yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessage(content="好的")}}
+
+
+class FakeSessionManager:
+    def __init__(self, agent):
+        self.agent = agent
+        self.appended = []
+
+    async def get_or_rebuild_agent(self, session_id, username, user_id):
+        return FakeSession(self.agent)
+
+    async def append_message(self, session_id, role, content):
+        self.appended.append((role, content))
+
+    async def load_messages(self, session_id):
+        return [HumanMessage(content="我了解 Redis zset")]
+
+
+class FakeSession:
+    def __init__(self, agent):
+        self.agent = agent
+        self.domain = "redis"
+        self.difficulty = "mid"
+        self.username = "tester"
+
+
+def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
+    agent = FakeStreamAgent()
+    fake_manager = FakeSessionManager(agent)
+
+    async def fake_get_user(username):
+        return {"id": 1, "username": username}
+
+    async def fake_search(query, domain):
+        assert domain == "redis"
+        return [{"topic": "ZSet", "question": "Zset底层是怎么实现的？", "followups": ["跳表怎么实现？"]}]
+
+    monkeypatch.setattr(server_module, "session_manager", fake_manager)
+    monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
+    monkeypatch.setattr(server_module, "search_interview_cards", fake_search)
+
+    with auth_client.stream("POST", "/api/chat/stream", json={"session_id": "sid", "message": "继续问 Redis"}) as resp:
+        body = "".join(resp.iter_text())
+
+    assert resp.status_code == 200
+    assert "好的" in body
+    assert isinstance(agent.last_messages[-1], SystemMessage)
+    assert "真实面试题参考" in agent.last_messages[-1].content
+    assert fake_manager.appended[0] == ("user", "继续问 Redis")
+    assert fake_manager.appended[-1] == ("ai", "好的")

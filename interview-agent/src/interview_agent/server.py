@@ -8,6 +8,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from langchain_core.messages import SystemMessage
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -19,6 +20,7 @@ from interview_agent.db import get_user_by_username, init_db
 from interview_agent.logging_config import setup_logging
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS
+from interview_agent.rag import build_rag_query, format_rag_context, search_interview_cards
 from interview_agent.session import session_manager
 
 logger = logging.getLogger(__name__)
@@ -333,11 +335,18 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
     await session_manager.append_message(req.session_id, "user", req.message)
     messages = await session_manager.load_messages(req.session_id)
+    rag_query = build_rag_query(ses.domain, ses.difficulty, req.message, messages)
+    rag_cards = await search_interview_cards(rag_query, ses.domain)
+    rag_context = format_rag_context(rag_cards)
+    run_messages = messages
+    if rag_context:
+        run_messages = [*messages, SystemMessage(content=rag_context)]
+        logger.info("rag context injected session=%s cards=%d chars=%d", req.session_id, len(rag_cards), len(rag_context))
 
     async def event_generator():
         full_content = ""
         async for event in ses.agent.astream_events(
-            {"messages": messages},
+            {"messages": run_messages},
             version="v2",
         ):
             kind = event.get("event")

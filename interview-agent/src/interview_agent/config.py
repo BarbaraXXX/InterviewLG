@@ -101,6 +101,36 @@ class VectorDBSettings(BaseSettings):
     base_url: str = "http://localhost:9000"
 
 
+class RAGSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="RAG_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    enabled: bool = True
+    top_k: int = 3
+    min_score: float = 0.0
+    timeout_seconds: float = 3.0
+    max_context_chars: int = 1800
+
+    @field_validator("top_k")
+    @classmethod
+    def _validate_top_k(cls, value: int) -> int:
+        return min(max(value, 1), 10)
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def _validate_timeout(cls, value: float) -> float:
+        return min(max(value, 0.2), 10.0)
+
+    @field_validator("max_context_chars")
+    @classmethod
+    def _validate_max_context_chars(cls, value: int) -> int:
+        return min(max(value, 200), 4000)
+
+
 class ServerSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SERVER_",
@@ -121,6 +151,7 @@ llm_settings = LLMSettings()
 mcp_settings = MCPSettings()
 auth_settings = AuthSettings()
 vectordb_settings = VectorDBSettings()
+rag_settings = RAGSettings()
 server_settings = ServerSettings()
 
 
@@ -132,6 +163,14 @@ def _log_loaded_settings() -> None:
             "settings loaded llm_provider=%s model=%s base_url=%s api_key=%s mcp_urls=%s vectordb=%s",
             llm_settings.default_provider, provider.model, provider.base_url, masked,
             mcp_settings.server_urls or "(none)", vectordb_settings.base_url,
+        )
+        logger.info(
+            "rag settings enabled=%s top_k=%d min_score=%.2f timeout=%.1fs max_context_chars=%d",
+            rag_settings.enabled,
+            rag_settings.top_k,
+            rag_settings.min_score,
+            rag_settings.timeout_seconds,
+            rag_settings.max_context_chars,
         )
     except Exception:
         logger.warning("failed to log loaded settings", exc_info=True)

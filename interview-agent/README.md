@@ -76,10 +76,36 @@ LLM_PROVIDERS={"local":{"base_url":"http://10.2.133.86:10087/v1","api_key":"","m
 VECTORDB_BASE_URL=http://localhost:9000
 VECTORDB_ADMIN_TOKEN=change-me-too
 
+# QuestionCard RAG（可选，vectordb 不可用时自动降级）
+RAG_ENABLED=true
+RAG_TOP_K=3
+RAG_MIN_SCORE=0.0
+RAG_TIMEOUT_SECONDS=3
+RAG_MAX_CONTEXT_CHARS=1800
+
 # 认证（生产必须改）
 AUTH_SECRET_KEY=change-me-in-production
 AUTH_COOKIE_SECURE=false
 ```
+
+### QuestionCard RAG 联调
+
+先在 `interview-vectordb` 导入 QuestionCard：
+
+```bash
+cd interview-vectordb
+uv run interview-vectordb import-cards ../rag-data-pipeline/data/output/question_cards
+uv run interview-vectordb
+```
+
+再启动 Agent：
+
+```bash
+cd interview-agent
+VECTORDB_BASE_URL=http://localhost:9000 RAG_ENABLED=true uv run interview-agent-server
+```
+
+面试对话中每轮最多检索 `RAG_TOP_K` 条真实面试题参考，并临时注入本轮模型上下文；这些 RAG 内容不会写入会话历史。
 
 ### 常见问题
 
@@ -88,6 +114,7 @@ AUTH_COOKIE_SECURE=false
 | 前端没显示新功能 | 浏览器缓存 | Cmd+Shift+R 硬刷新 |
 | LLM 502 错误 | .env 未加载或 API 不可达 | 检查 `llm_settings.get_provider()` 输出 |
 | 面试偏好下拉为空 | vectordb 未启动或未生成 Profile | 先启动 vectordb，运行 `regen` |
+| RAG 没生效 | vectordb 未导入 QuestionCard 或 `RAG_ENABLED=false` | 检查 `GET /api/question-cards/stats` 和 app 日志 |
 | 旧账号无法登录 | 用户存储已迁移到 SQLite，启动时会从旧 users.json 一次性导入 | 确认 `data/interview.db` 可写，查看启动日志 |
 
 ## Docker 部署
