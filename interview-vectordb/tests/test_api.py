@@ -7,7 +7,9 @@ from httpx import ASGITransport, AsyncClient
 from interview_vectordb import api as api_module
 from interview_vectordb.api import api_app
 from interview_vectordb.db import ProfileDB
-from interview_vectordb.schema import InterviewProfile
+from interview_vectordb.embeddings import DeterministicEmbeddingProvider
+from interview_vectordb.question_cards import QuestionCardStore
+from interview_vectordb.schema import InterviewProfile, QuestionCard
 
 
 @pytest.fixture
@@ -33,6 +35,11 @@ def test_db(mock_openai, isolate_env, monkeypatch):
     fresh_db = ProfileDB()
     monkeypatch.setattr(api_module, "_db", fresh_db)
     monkeypatch.setattr(api_module, "_EXPERIENCES_DIR", isolate_env / "experiences")
+    monkeypatch.setattr(
+        api_module,
+        "_question_card_store",
+        QuestionCardStore(isolate_env / "question_cards" / "question_cards.sqlite3", DeterministicEmbeddingProvider(64)),
+    )
     monkeypatch.setattr(api_module.security_settings, "admin_token", "test-admin-token")
     return fresh_db
 
@@ -163,3 +170,33 @@ async def test_validate_path_segment_empty(client):
 async def test_validate_path_segment_traversal(client):
     r = await client.get("/api/profiles/..etc/B")
     assert r.status_code == 400
+
+
+async def test_question_cards_stats_empty(client):
+    r = await client.get("/api/question-cards/stats")
+    assert r.status_code == 200
+    assert r.json() == {"count": 0, "domains": {}}
+
+
+async def test_search_question_cards(client):
+    api_module._question_card_store.import_cards([
+        QuestionCard(
+            id="redis",
+            domain=["backend", "redis"],
+            topic="Redis 数据结构",
+            question="讲一下 Redis zset 跳表",
+            answer_outline=["跳表支持范围查询"],
+            followups=["为什么不用红黑树？"],
+            tags=["redis", "zset"],
+        )
+    ])
+
+    r = await client.post(
+        "/api/question-cards/search",
+        json={"query": "redis zset 跳表", "domain": ["redis"], "top_k": 3},
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["cards"]) == 1
+    assert body["cards"][0]["id"] == "redis"

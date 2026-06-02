@@ -46,6 +46,44 @@ def _start_server() -> None:
     uvicorn.run(api_app, host="0.0.0.0", port=mcp_server_settings.port)
 
 
+def _build_question_card_store():
+    from interview_vectordb.config import embedding_settings
+    from interview_vectordb.db import _QUESTION_CARDS_DB_PATH
+    from interview_vectordb.embeddings import build_embedding_provider
+    from interview_vectordb.question_cards import QuestionCardStore
+
+    return QuestionCardStore(_QUESTION_CARDS_DB_PATH, build_embedding_provider(embedding_settings))
+
+
+def _import_question_cards(path: Path) -> None:
+    from interview_vectordb.config import embedding_settings
+    from interview_vectordb.question_cards import load_question_cards_from_path
+
+    cards = load_question_cards_from_path(path)
+    store = _build_question_card_store()
+    stats = store.import_cards(cards, batch_size=embedding_settings.batch_size, replace=True)
+    payload = {
+        "embedding": {
+            "provider": embedding_settings.provider,
+            "base_url": embedding_settings.base_url,
+            "model": embedding_settings.model,
+            "dimensions": embedding_settings.dimensions,
+            "batch_size": embedding_settings.batch_size,
+            "external_api": embedding_settings.provider.strip().lower() not in {"deterministic", "fake", "local"},
+        },
+        "input_cards": len(cards),
+        **stats,
+        "total": store.count(),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _search_question_cards(query: str, domain: list[str]) -> None:
+    store = _build_question_card_store()
+    cards = store.search(query, domain=domain, top_k=5)
+    print(json.dumps({"cards": cards}, ensure_ascii=False, indent=2))
+
+
 def main() -> None:
     setup_logging()
     if len(sys.argv) < 2:
@@ -76,6 +114,18 @@ def main() -> None:
 
     elif cmd == "serve":
         _start_server()
+
+    elif cmd == "import-cards":
+        if len(sys.argv) < 3:
+            print("Usage: interview-vectordb import-cards <jsonl-file-or-directory>")
+            sys.exit(1)
+        _import_question_cards(Path(sys.argv[2]))
+
+    elif cmd == "search-cards":
+        if len(sys.argv) < 3:
+            print("Usage: interview-vectordb search-cards <query> [domain ...]")
+            sys.exit(1)
+        _search_question_cards(sys.argv[2], sys.argv[3:])
 
     elif cmd == "regen":
         db = ProfileDB()

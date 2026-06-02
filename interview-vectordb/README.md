@@ -1,6 +1,9 @@
 # interview-vectordb
 
-面经偏好聚合服务。从非结构化面经中提取公司/岗位的面试风格 Profile，供 Agent 注入系统提示词。
+面经偏好聚合与 QuestionCard RAG 服务。
+
+- 从非结构化面经中提取公司/岗位的面试风格 Profile，供 Agent 注入系统提示词。
+- 导入 RAG QuestionCard，生成 embedding，并提供语义检索 API，供 Agent 按需检索真实面试题参考。
 
 ## 架构
 
@@ -11,12 +14,15 @@ src/interview_vectordb/
   api.py          REST API          FastAPI，6 个端点
   server.py       MCP Server        FastMCP，4 个工具
   db.py           ProfileDB         JSON 文件存储 + LLM 分层聚合
-  schema.py       数据模型          InterviewExperience + InterviewProfile
-  config.py       配置               LLMSettings / MCPServerSettings
+  question_cards.py QuestionCardStore SQLite 存储 + 向量检索
+  embeddings.py   EmbeddingProvider  deterministic / OpenAI-compatible
+  schema.py       数据模型          InterviewExperience + InterviewProfile + QuestionCard
+  config.py       配置               LLMSettings / EmbeddingSettings / MCPServerSettings
 
 data/
   experiences/    面经原始文件        {company}_{position}_{uuid}.json
   profiles/       聚合后的 Profile   {company}_{position}.json
+  question_cards/ RAG SQLite         question_cards.sqlite3
 ```
 
 ## 数据模型
@@ -38,6 +44,20 @@ interview_style: str      # 面试风格描述
 question_types: list[str] # 常见问题类型
 key_traits: list[str]     # 区分性特征
 source_count: int         # 聚合来源面经数量
+```
+
+### QuestionCard（RAG 输入）
+```python
+id: str
+domain: list[str]
+topic: str
+question: str
+answer_outline: list[str]
+followups: list[str]
+tags: list[str]
+difficulty: str
+source_url: str
+source_title: str
 ```
 
 ## 聚合策略
@@ -74,6 +94,36 @@ uv run interview-vectordb profile 字节跳动 后端工程师
 uv run interview-vectordb          # REST (9000) + MCP (9000/mcp)
 ```
 
+### QuestionCard RAG
+
+本地无 key 验证使用 deterministic embedding，不会调用外部 API：
+
+```bash
+EMBEDDING_PROVIDER=deterministic EMBEDDING_DIMENSIONS=64 \
+  uv run interview-vectordb import-cards ../rag-data-pipeline/data/output/question_cards
+
+EMBEDDING_PROVIDER=deterministic EMBEDDING_DIMENSIONS=64 \
+  uv run interview-vectordb search-cards "redis zset 跳表" redis
+```
+
+真实导入建议使用 DashScope `text-embedding-v4`：
+
+```bash
+EMBEDDING_PROVIDER=dashscope
+EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+EMBEDDING_API_KEY=your-dashscope-api-key
+EMBEDDING_MODEL=text-embedding-v4
+EMBEDDING_DIMENSIONS=1024
+EMBEDDING_BATCH_SIZE=10
+```
+
+然后执行：
+
+```bash
+uv run interview-vectordb import-cards ../rag-data-pipeline/data/output/question_cards
+uv run interview-vectordb search-cards "redis zset 跳表" redis
+```
+
 ### .env 配置
 
 ```bash
@@ -81,6 +131,14 @@ LLM_BASE_URL=https://api.deepseek.com
 LLM_API_KEY=sk-xxx
 LLM_MODEL=deepseek-chat
 MCP_SERVER_PORT=9000
+VECTORDB_ADMIN_TOKEN=change-me
+
+EMBEDDING_PROVIDER=dashscope
+EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+EMBEDDING_API_KEY=sk-xxx
+EMBEDDING_MODEL=text-embedding-v4
+EMBEDDING_DIMENSIONS=1024
+EMBEDDING_BATCH_SIZE=10
 ```
 
 ### REST API
@@ -93,6 +151,19 @@ MCP_SERVER_PORT=9000
 | `/api/profiles/{company}/{position}/generate` | POST | 强制重新生成 |
 | `/api/experiences/count` | GET | 按公司/岗位统计面经数 |
 | `/api/experiences/import` | POST | 批量导入面经 |
+| `/api/question-cards/stats` | GET | QuestionCard 数量和 domain 统计 |
+| `/api/question-cards/search` | POST | 语义检索 QuestionCard |
+
+QuestionCard search 请求示例：
+
+```json
+{
+  "query": "Redis zset 跳表底层实现",
+  "domain": ["redis"],
+  "top_k": 5,
+  "min_score": 0.0
+}
+```
 
 ### MCP 工具
 

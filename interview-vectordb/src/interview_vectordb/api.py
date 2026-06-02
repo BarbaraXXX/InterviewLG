@@ -5,9 +5,11 @@ import re
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from interview_vectordb.config import security_settings
-from interview_vectordb.db import ProfileDB, _EXPERIENCES_DIR
-from interview_vectordb.schema import InterviewExperience
+from interview_vectordb.config import embedding_settings, security_settings
+from interview_vectordb.db import ProfileDB, _EXPERIENCES_DIR, _QUESTION_CARDS_DB_PATH
+from interview_vectordb.embeddings import build_embedding_provider
+from interview_vectordb.question_cards import QuestionCardStore
+from interview_vectordb.schema import InterviewExperience, QuestionCardSearchRequest
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +23,7 @@ api_app.add_middleware(
 )
 
 _db = ProfileDB()
+_question_card_store = QuestionCardStore(_QUESTION_CARDS_DB_PATH, build_embedding_provider(embedding_settings))
 
 _MAX_IMPORT_BATCH = 500
 _PATH_SEGMENT_RE = re.compile(r'^[\w\u4e00-\u9fff\s\-().&+,]+$')
@@ -124,3 +127,29 @@ async def import_experiences(experiences: list[InterviewExperience]) -> dict:
     ids = _db.add_experiences(experiences)
     logger.info("Imported %d experiences", len(ids))
     return {"imported": len(ids), "ids": ids}
+
+
+@api_app.post("/api/question-cards/search")
+async def search_question_cards(request: QuestionCardSearchRequest) -> dict:
+    logger.info(
+        "POST /api/question-cards/search domain=%s top_k=%d query_len=%d",
+        request.domain,
+        request.top_k,
+        len(request.query),
+    )
+    cards = _question_card_store.search(
+        request.query,
+        domain=request.domain,
+        top_k=request.top_k,
+        min_score=request.min_score,
+    )
+    return {"cards": cards}
+
+
+@api_app.get("/api/question-cards/stats")
+async def question_cards_stats() -> dict:
+    logger.info("GET /api/question-cards/stats")
+    return {
+        "count": _question_card_store.count(),
+        "domains": _question_card_store.domain_counts(),
+    }

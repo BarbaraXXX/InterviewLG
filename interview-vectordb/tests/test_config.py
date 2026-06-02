@@ -65,3 +65,32 @@ def test_mcp_server_settings_default_port(monkeypatch):
 
     s = MCPServerSettings(_env_file=None)
     assert s.port == 9000
+
+
+def test_embedding_settings_defaults(monkeypatch):
+    monkeypatch.delenv("EMBEDDING_PROVIDER", raising=False)
+    monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("EMBEDDING_DIMENSIONS", raising=False)
+    monkeypatch.delenv("EMBEDDING_BATCH_SIZE", raising=False)
+
+    from interview_vectordb.config import EmbeddingSettings
+
+    s = EmbeddingSettings(_env_file=None)
+    assert s.provider == "deterministic"
+    assert s.model == "text-embedding-v4"
+    assert s.dimensions == 1024
+
+
+def test_embedding_settings_from_env(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "dashscope")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "sk-test")
+    monkeypatch.setenv("EMBEDDING_DIMENSIONS", "512")
+    monkeypatch.setenv("EMBEDDING_BATCH_SIZE", "5")
+
+    from interview_vectordb.config import EmbeddingSettings
+
+    s = EmbeddingSettings(_env_file=None)
+    assert s.provider == "dashscope"
+    assert s.api_key == "sk-test"
+    assert s.dimensions == 512
+    assert s.batch_size == 5

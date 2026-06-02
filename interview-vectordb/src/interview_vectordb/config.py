@@ -58,6 +58,41 @@ class MCPServerSettings(BaseSettings):
     port: int = 9000
 
 
+class EmbeddingSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="EMBEDDING_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    provider: str = "deterministic"
+    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    api_key: str = ""
+    model: str = "text-embedding-v4"
+    dimensions: int = 1024
+    batch_size: int = 10
+
+    @field_validator("api_key", mode="before")
+    @classmethod
+    def _coerce_none_key(cls, v: str | None) -> str:
+        return v or ""
+
+    @field_validator("dimensions")
+    @classmethod
+    def _validate_dimensions(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("embedding dimensions must be positive")
+        return v
+
+    @field_validator("batch_size")
+    @classmethod
+    def _validate_batch_size(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("embedding batch_size must be positive")
+        return v
+
+
 class VectorDBSecuritySettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="VECTORDB_",
@@ -82,6 +117,7 @@ def _mask_api_key(key: str) -> str:
 
 
 llm_settings = LLMSettings()
+embedding_settings = EmbeddingSettings()
 mcp_server_settings = MCPServerSettings()
 security_settings = VectorDBSecuritySettings()
 
@@ -90,5 +126,14 @@ logger.info(
     llm_settings.base_url,
     llm_settings.model,
     _mask_api_key(llm_settings.api_key),
+)
+logger.info(
+    "Loaded EmbeddingSettings: provider=%s base_url=%s model=%s dimensions=%d batch_size=%d api_key=%s",
+    embedding_settings.provider,
+    embedding_settings.base_url,
+    embedding_settings.model,
+    embedding_settings.dimensions,
+    embedding_settings.batch_size,
+    _mask_api_key(embedding_settings.api_key),
 )
 logger.info("Loaded MCPServerSettings: port=%d", mcp_server_settings.port)
