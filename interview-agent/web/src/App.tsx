@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { fetchDomains, createSession, fetchProfiles, streamChat, getMe, logout, login, register } from './api';
 
-type View = 'loading' | 'login' | 'setup' | 'chat';
+type View = 'loading' | 'login' | 'dashboard' | 'setup' | 'chat' | 'profile' | 'history' | 'insights';
 
 interface Message {
   role: 'user' | 'ai';
@@ -70,6 +70,45 @@ const DOMAIN_DESCRIPTIONS: Record<string, string> = {
 
 const getDomainDescription = (domain: string) =>
   DOMAIN_DESCRIPTIONS[domain] || '将根据你输入的方向生成更贴近该岗位的技术追问。';
+
+function LogoMark() {
+  return (
+    <div className="logo-mark">
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+        <rect width="36" height="36" rx="8" fill="var(--color-accent)" />
+        <path d="M10 18L16 12L22 18L16 24Z" fill="white" opacity="0.9" />
+        <path d="M16 18L22 12L28 18L22 24Z" fill="white" opacity="0.6" />
+      </svg>
+    </div>
+  );
+}
+
+function ConsoleTopbar({
+  title,
+  username,
+  onLogout,
+  onHome,
+}: {
+  title: string;
+  username: string;
+  onLogout: () => void;
+  onHome?: () => void;
+}) {
+  return (
+    <header className="console-topbar">
+      <div className="brand-lockup">
+        <LogoMark />
+        <span>{title}</span>
+      </div>
+      <div className="user-badge">
+        <span className="system-pill">已登录</span>
+        <span className="user-badge-name">{username}</span>
+        {onHome && <button className="ghost-link" onClick={onHome}>工作台</button>}
+        <button className="logout-link" onClick={onLogout}>退出</button>
+      </div>
+    </header>
+  );
+}
 
 function LoginView({ onLogin }: { onLogin: (username: string) => void }) {
   const [isRegister, setIsRegister] = useState(false);
@@ -243,10 +282,146 @@ function LoginView({ onLogin }: { onLogin: (username: string) => void }) {
   );
 }
 
-function SetupView({ onStart, username, onLogout }: {
+function DashboardView({
+  username,
+  onStartInterview,
+  onProfile,
+  onHistory,
+  onInsights,
+  onLogout,
+}: {
+  username: string;
+  onStartInterview: () => void;
+  onProfile: () => void;
+  onHistory: () => void;
+  onInsights: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="setup-view">
+      <div className="console-shell dashboard-shell">
+        <ConsoleTopbar title="Interview Agent 工作台" username={username} onLogout={onLogout} />
+
+        <main className="dashboard-grid">
+          <section className="dashboard-hero" aria-label="工作台概览">
+            <div className="dashboard-hero-copy">
+              <p className="eyebrow">Workspace</p>
+              <h1 className="setup-title">选择下一步训练任务</h1>
+              <p className="setup-subtitle">
+                从这里进入模拟面试、完善个人信息，或查看后续接入的历史记录与表现总结。当前优先保留核心面试流程，其他能力先作为功能入口预留。
+              </p>
+            </div>
+            <div className="dashboard-primary-action">
+              <span>Recommended</span>
+              <strong>开始一轮新的模拟面试</strong>
+              <p>配置方向、难度和 JD 后进入连续追问。</p>
+              <button className="start-button launch-button" onClick={onStartInterview}>开始模拟面试</button>
+            </div>
+          </section>
+
+          <section className="dashboard-actions" aria-label="功能入口">
+            <button className="workspace-action primary" onClick={onStartInterview}>
+              <em>01</em>
+              <span>开始面试配置</span>
+              <strong>模拟技术面试</strong>
+              <small>选择技术方向、难度、JD 与面试偏好，进入 AI 面试官对话。</small>
+            </button>
+            <button className="workspace-action" onClick={onProfile}>
+              <em>02</em>
+              <span>个人信息</span>
+              <strong>完善简历与目标岗位</strong>
+              <small>后续用于让问题更贴近你的项目经历、技术栈和投递目标。</small>
+            </button>
+            <button className="workspace-action" onClick={onHistory}>
+              <em>03</em>
+              <span>历史记录</span>
+              <strong>查看过往面试</strong>
+              <small>后续展示每次练习的方向、难度、时间和面试状态。</small>
+            </button>
+            <button className="workspace-action" onClick={onInsights}>
+              <em>04</em>
+              <span>AI 总结</span>
+              <strong>历史表现分析</strong>
+              <small>后续汇总知识覆盖、表达质量、追问表现和改进建议。</small>
+            </button>
+          </section>
+
+          <aside className="dashboard-status" aria-label="当前状态">
+            <div>
+              <span>Account</span>
+              <strong>{username}</strong>
+              <small>当前浏览器会话已登录</small>
+            </div>
+            <div>
+              <span>Core Flow</span>
+              <strong>可用</strong>
+              <small>模拟面试配置与对话流程保持原逻辑</small>
+            </div>
+            <div>
+              <span>Reserved</span>
+              <strong>3 个入口</strong>
+              <small>个人信息、历史记录和 AI 总结等待后续接入</small>
+            </div>
+          </aside>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function PlaceholderView({
+  username,
+  title,
+  eyebrow,
+  description,
+  blocks,
+  onHome,
+  onStartInterview,
+  onLogout,
+}: {
+  username: string;
+  title: string;
+  eyebrow: string;
+  description: string;
+  blocks: { label: string; title: string; description: string }[];
+  onHome: () => void;
+  onStartInterview: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="setup-view">
+      <div className="console-shell placeholder-shell">
+        <ConsoleTopbar title={title} username={username} onLogout={onLogout} onHome={onHome} />
+        <main className="placeholder-layout">
+          <section className="placeholder-main">
+            <p className="eyebrow">{eyebrow}</p>
+            <h1 className="setup-title">{title}</h1>
+            <p className="setup-subtitle">{description}</p>
+            <div className="placeholder-actions">
+              <button className="inline-start-button" onClick={onStartInterview}>开始模拟面试</button>
+              <button className="secondary-button" onClick={onHome}>返回工作台</button>
+            </div>
+          </section>
+          <section className="placeholder-blocks" aria-label="待接入能力">
+            {blocks.map((block) => (
+              <article className="placeholder-block" key={block.label}>
+                <span>{block.label}</span>
+                <strong>{block.title}</strong>
+                <p>{block.description}</p>
+              </article>
+            ))}
+          </section>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function SetupView({ onStart, username, onLogout, onBack }: {
   onStart: (domain: string, difficulty: string, jobDescription: string, profileCompany: string, profilePosition: string) => void;
   username: string;
   onLogout: () => void;
+  onBack: () => void;
 }) {
   const [domains, setDomains] = useState<string[]>(DEFAULT_DOMAINS);
   const [selectedDomain, setSelectedDomain] = useState('');
@@ -289,23 +464,7 @@ function SetupView({ onStart, username, onLogout }: {
   return (
     <div className="setup-view">
       <div className="console-shell">
-        <header className="console-topbar">
-          <div className="brand-lockup">
-            <div className="logo-mark">
-              <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-                <rect width="36" height="36" rx="8" fill="var(--color-accent)" />
-                <path d="M10 18L16 12L22 18L16 24Z" fill="white" opacity="0.9" />
-                <path d="M16 18L22 12L28 18L22 24Z" fill="white" opacity="0.6" />
-              </svg>
-            </div>
-            <span>模拟技术面试</span>
-          </div>
-          <div className="user-badge">
-            <span className="system-pill">已登录</span>
-            <span className="user-badge-name">{username}</span>
-            <button className="logout-link" onClick={onLogout}>退出</button>
-          </div>
-        </header>
+        <ConsoleTopbar title="模拟技术面试" username={username} onLogout={onLogout} onHome={onBack} />
 
         <div className="console-grid">
           <aside className="workflow-rail" aria-label="配置步骤">
@@ -696,7 +855,7 @@ function App() {
       .then((me) => {
         if (me) {
           setUsername(me.username);
-          setView('setup');
+          setView('dashboard');
         } else {
           clearActiveBrowserSession();
           setView('login');
@@ -711,7 +870,7 @@ function App() {
   const handleLogin = (user: string) => {
     markActiveBrowserSession();
     setUsername(user);
-    setView('setup');
+    setView('dashboard');
   };
 
   const handleLogout = async () => {
@@ -738,16 +897,86 @@ function App() {
   };
 
   const handleEnd = () => {
-    setView('setup');
+    setView('dashboard');
     setSessionId('');
+  };
+
+  const goHome = () => {
+    setSessionId('');
+    setView('dashboard');
   };
 
   return (
     <>
       {view === 'loading' && <LoadingView />}
       {view === 'login' && <LoginView onLogin={handleLogin} />}
-      {view === 'setup' && <SetupView onStart={handleStart} username={username} onLogout={handleLogout} />}
+      {view === 'dashboard' && (
+        <DashboardView
+          username={username}
+          onStartInterview={() => setView('setup')}
+          onProfile={() => setView('profile')}
+          onHistory={() => setView('history')}
+          onInsights={() => setView('insights')}
+          onLogout={handleLogout}
+        />
+      )}
+      {view === 'setup' && (
+        <SetupView
+          onStart={handleStart}
+          username={username}
+          onLogout={handleLogout}
+          onBack={goHome}
+        />
+      )}
       {view === 'chat' && <ChatView sessionId={sessionId} domain={domain} difficulty={difficulty} onEnd={handleEnd} />}
+      {view === 'profile' && (
+        <PlaceholderView
+          username={username}
+          title="完善个人信息"
+          eyebrow="Profile"
+          description="这个页面先作为简历与目标岗位信息入口预留。后续接入后，可用你的项目、技术栈和求职目标增强面试问题的个性化程度。"
+          blocks={[
+            { label: 'Profile', title: '基本信息与目标岗位', description: '记录目标方向、期望岗位、经验年限和主要技术栈。' },
+            { label: 'Resume', title: '简历与项目经历', description: '沉淀项目背景、技术职责、难点和可被追问的细节。' },
+            { label: 'Preference', title: '面试偏好', description: '配置重点训练方向、期望强度和需要规避的内容。' },
+          ]}
+          onHome={goHome}
+          onStartInterview={() => setView('setup')}
+          onLogout={handleLogout}
+        />
+      )}
+      {view === 'history' && (
+        <PlaceholderView
+          username={username}
+          title="历史面试记录"
+          eyebrow="History"
+          description="这个页面先作为过往面试入口预留。后续接入后，可查看每次练习的方向、难度、会话状态和关键问题。"
+          blocks={[
+            { label: 'Records', title: '面试列表', description: '按时间展示面试方向、难度、开始时间和结束状态。' },
+            { label: 'Messages', title: '对话回看', description: '进入单次记录后查看问题、回答和追问链路。' },
+            { label: 'Export', title: '记录导出', description: '后续可按需导出复盘材料或训练摘要。' },
+          ]}
+          onHome={goHome}
+          onStartInterview={() => setView('setup')}
+          onLogout={handleLogout}
+        />
+      )}
+      {view === 'insights' && (
+        <PlaceholderView
+          username={username}
+          title="AI 表现总结"
+          eyebrow="Insights"
+          description="这个页面先作为历史表现分析入口预留。后续接入后，将基于多轮面试记录总结知识覆盖、表达质量和提升建议。"
+          blocks={[
+            { label: 'Coverage', title: '知识覆盖', description: '分析常见技术主题的掌握情况和薄弱区域。' },
+            { label: 'Depth', title: '追问表现', description: '总结面对深入追问时的稳定性、完整度和边界意识。' },
+            { label: 'Action', title: '改进建议', description: '输出下一阶段更适合训练的问题类型和复习重点。' },
+          ]}
+          onHome={goHome}
+          onStartInterview={() => setView('setup')}
+          onLogout={handleLogout}
+        />
+      )}
       <footer className="site-footer">
         <a className="beian-link" href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">
           浙ICP备2026035635号
