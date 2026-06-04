@@ -189,8 +189,13 @@ async def list_user_sessions(user_id: int, limit: int = 20) -> list[dict]:
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT id, domain, difficulty, status, created_at, ended_at "
-            "FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            "SELECT s.id, s.domain, s.difficulty, s.status, s.created_at, s.ended_at, "
+            "COUNT(m.id) AS message_count "
+            "FROM sessions s "
+            "LEFT JOIN messages m ON m.session_id = s.id "
+            "WHERE s.user_id = ? "
+            "GROUP BY s.id "
+            "ORDER BY s.created_at DESC LIMIT ?",
             (user_id, limit),
         ) as cursor:
             rows = await cursor.fetchall()
@@ -199,18 +204,19 @@ async def list_user_sessions(user_id: int, limit: int = 20) -> list[dict]:
         await db.close()
 
 
-async def delete_expired_sessions() -> int:
+async def expire_stale_sessions() -> int:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "DELETE FROM sessions WHERE status = 'active' AND "
+            "UPDATE sessions SET status = 'expired', ended_at = datetime('now') "
+            "WHERE status = 'active' AND "
             f"datetime(created_at, '+{_TTL_SECONDS} seconds') < datetime('now')"
         )
         await db.commit()
-        deleted = cursor.rowcount
-        if deleted:
-            logger.info("evicted %d expired sessions", deleted)
-        return deleted
+        expired = cursor.rowcount
+        if expired:
+            logger.info("marked %d stale sessions expired", expired)
+        return expired
     finally:
         await db.close()
 
@@ -260,7 +266,7 @@ async def get_session_messages(session_id: str, limit: int = _MAX_MESSAGES_PER_S
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT role, content, seq FROM messages WHERE session_id = ? "
+            "SELECT role, content, seq, created_at FROM messages WHERE session_id = ? "
             "ORDER BY seq ASC LIMIT ?",
             (session_id, limit),
         ) as cursor:

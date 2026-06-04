@@ -5,7 +5,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from interview_agent import server as server_module
 from interview_agent.auth import get_current_user
-from interview_agent.db import init_db
+from interview_agent.db import create_message, create_session as db_create_session, create_user, get_session, init_db
 from interview_agent.jd_parser import StructuredJD
 
 
@@ -79,6 +79,83 @@ def test_list_domains(client):
     assert "presets" in body
     assert "backend" in body["presets"]
     assert len(body["presets"]) == 8
+
+
+def test_list_sessions_returns_current_user_summaries(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      other_id = await create_user("other", "hash")
+      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await create_message("sid-1", "user", "question content", 0)
+      await create_message("sid-1", "ai", "answer content", 1)
+      await db_create_session("sid-other", other_id, "other", "frontend", "junior")
+
+    anyio.run(seed)
+
+    resp = auth_client.get("/api/sessions")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["sessions"]) == 1
+    item = body["sessions"][0]
+    assert item["id"] == "sid-1"
+    assert item["domain"] == "backend"
+    assert item["message_count"] == 2
+    assert "question content" not in str(item)
+
+
+def test_get_session_detail_returns_messages_for_owner(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await create_message("sid-1", "user", "我了解缓存", 0)
+      await create_message("sid-1", "ai", "那 Redis 为什么快？", 1)
+
+    anyio.run(seed)
+
+    resp = auth_client.get("/api/sessions/sid-1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session"]["id"] == "sid-1"
+    assert [m["role"] for m in body["messages"]] == ["user", "ai"]
+    assert body["messages"][0]["content"] == "我了解缓存"
+
+
+def test_get_session_detail_rejects_other_user_session(auth_client):
+    import anyio
+
+    async def seed():
+      await create_user("tester", "hash")
+      other_id = await create_user("other", "hash")
+      await db_create_session("sid-other", other_id, "other", "frontend", "junior")
+
+    anyio.run(seed)
+
+    resp = auth_client.get("/api/sessions/sid-other")
+
+    assert resp.status_code == 404
+
+
+def test_end_session_marks_completed(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+
+    anyio.run(seed)
+
+    resp = auth_client.post("/api/sessions/sid-1/end")
+
+    assert resp.status_code == 200
+    row = anyio.run(get_session, "sid-1")
+    assert row["status"] == "completed"
+    assert row["ended_at"] is not None
 
 
 def test_sanitize_path_segment_normal():

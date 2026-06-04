@@ -1,5 +1,21 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { fetchDomains, createSession, fetchProfiles, streamChat, getMe, logout, login, register } from './api';
+import {
+  createSession,
+  endInterviewSession,
+  fetchDomains,
+  fetchInterviewSessionDetail,
+  fetchInterviewSessions,
+  fetchProfiles,
+  getMe,
+  login,
+  logout,
+  register,
+  streamChat,
+  type InterviewMessage,
+  type InterviewSessionDetail,
+  type InterviewSessionSummary,
+} from './api';
+import { RELEASE_NOTES } from './releaseNotes';
 
 type View = 'loading' | 'login' | 'dashboard' | 'setup' | 'chat' | 'profile' | 'history' | 'insights';
 
@@ -70,6 +86,49 @@ const DOMAIN_DESCRIPTIONS: Record<string, string> = {
 
 const getDomainDescription = (domain: string) =>
   DOMAIN_DESCRIPTIONS[domain] || '将根据你输入的方向生成更贴近该岗位的技术追问。';
+
+const STATUS_LABELS: Record<string, string> = {
+  active: '进行中',
+  completed: '已结束',
+  expired: '已过期',
+};
+
+function formatDateTime(value: string | null): string {
+  if (!value) return '未结束';
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function toQaPairs(messages: InterviewMessage[]) {
+  const pairs: { question: InterviewMessage; answer?: InterviewMessage }[] = [];
+  let pendingQuestion: InterviewMessage | null = null;
+
+  for (const message of messages) {
+    if (message.role === 'user') {
+      if (pendingQuestion) {
+        pairs.push({ question: pendingQuestion });
+      }
+      pendingQuestion = message;
+    } else if (pendingQuestion) {
+      pairs.push({ question: pendingQuestion, answer: message });
+      pendingQuestion = null;
+    }
+  }
+
+  if (pendingQuestion) {
+    pairs.push({ question: pendingQuestion });
+  }
+
+  return pairs;
+}
 
 function LogoMark() {
   return (
@@ -363,6 +422,27 @@ function DashboardView({
               <small>个人信息、历史记录和 AI 总结等待后续接入</small>
             </div>
           </aside>
+
+          <section className="release-panel" aria-label="版本更新记录">
+            <div className="release-panel-head">
+              <p className="eyebrow">Updates</p>
+              <h2>版本更新记录</h2>
+              <p>这里展示最近部署后的主要功能变化。</p>
+            </div>
+            <div className="release-list">
+              {RELEASE_NOTES.map((note) => (
+                <article className="release-note" key={`${note.date}-${note.title}`}>
+                  <time>{note.date}</time>
+                  <strong>{note.title}</strong>
+                  <ul>
+                    {note.items.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </article>
+              ))}
+            </div>
+          </section>
         </main>
       </div>
     </div>
@@ -410,6 +490,185 @@ function PlaceholderView({
                 <p>{block.description}</p>
               </article>
             ))}
+          </section>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function HistoryView({
+  username,
+  onHome,
+  onStartInterview,
+  onLogout,
+}: {
+  username: string;
+  onHome: () => void;
+  onStartInterview: () => void;
+  onLogout: () => void;
+}) {
+  const [sessions, setSessions] = useState<InterviewSessionSummary[]>([]);
+  const [selectedId, setSelectedId] = useState('');
+  const [detail, setDetail] = useState<InterviewSessionDetail | null>(null);
+  const [loadingList, setLoadingList] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [error, setError] = useState('');
+
+  const loadSessions = useCallback(async () => {
+    setLoadingList(true);
+    setError('');
+    try {
+      const rows = await fetchInterviewSessions(50);
+      setSessions(rows);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setError('历史记录加载失败，请稍后重试。');
+      }
+    } finally {
+      setLoadingList(false);
+    }
+  }, [onLogout]);
+
+  useEffect(() => {
+    let ignore = false;
+    fetchInterviewSessions(50)
+      .then((rows) => {
+        if (!ignore) {
+          setSessions(rows);
+        }
+      })
+      .catch((err) => {
+        if (ignore) return;
+        if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+          onLogout();
+        } else {
+          setError('历史记录加载失败，请稍后重试。');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoadingList(false);
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [onLogout]);
+
+  const selectSession = async (sessionId: string) => {
+    setSelectedId(sessionId);
+    setLoadingDetail(true);
+    setError('');
+    try {
+      const data = await fetchInterviewSessionDetail(sessionId);
+      setDetail(data);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setError('面试详情加载失败，请稍后重试。');
+      }
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const activeSession = sessions.find((session) => session.id === selectedId);
+  const qaPairs = detail ? toQaPairs(detail.messages) : [];
+
+  return (
+    <div className="setup-view">
+      <div className="console-shell history-shell">
+        <ConsoleTopbar title="历史面试记录" username={username} onLogout={onLogout} onHome={onHome} />
+        <main className="history-layout">
+          <section className="history-list-panel">
+            <div className="history-panel-head">
+              <div>
+                <p className="eyebrow">History</p>
+                <h1 className="setup-title">历史面试记录</h1>
+                <p className="setup-subtitle">这里只展示面试概要。点击某次记录后，再加载具体 QA 内容。</p>
+              </div>
+              <button className="secondary-button history-refresh-button" onClick={loadSessions} disabled={loadingList}>
+                {loadingList ? '刷新中' : '刷新'}
+              </button>
+            </div>
+
+            {error && <div className="login-error" role="alert">{error}</div>}
+
+            <div className="history-records" aria-label="历史面试列表">
+              {loadingList && <div className="history-empty">正在加载历史记录...</div>}
+              {!loadingList && sessions.length === 0 && (
+                <div className="history-empty">
+                  <strong>暂无历史面试</strong>
+                  <span>完成一次模拟面试后，这里会显示记录。</span>
+                  <button className="inline-start-button" onClick={onStartInterview}>开始模拟面试</button>
+                </div>
+              )}
+              {!loadingList && sessions.map((session) => (
+                <button
+                  key={session.id}
+                  className={`history-record ${session.id === selectedId ? 'active' : ''}`}
+                  onClick={() => void selectSession(session.id)}
+                  aria-pressed={session.id === selectedId}
+                >
+                  <span>{STATUS_LABELS[session.status] || session.status}</span>
+                  <strong>{DOMAIN_LABELS[session.domain] || session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === session.difficulty)?.label || session.difficulty}</strong>
+                  <small>{formatDateTime(session.created_at)} · {session.message_count} 条消息</small>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="history-detail-panel" aria-label="面试详情">
+            {!selectedId && (
+              <div className="history-detail-empty">
+                <p className="eyebrow">Detail</p>
+                <h2>选择一条记录查看 QA</h2>
+                <p>列表只展示概要，具体的提问与回答会在这里按轮次展示。</p>
+              </div>
+            )}
+            {selectedId && loadingDetail && <div className="history-detail-empty">正在加载面试详情...</div>}
+            {selectedId && !loadingDetail && detail && (
+              <>
+                <div className="history-detail-head">
+                  <div>
+                    <p className="eyebrow">Interview Detail</p>
+                    <h2>{DOMAIN_LABELS[detail.session.domain] || detail.session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === detail.session.difficulty)?.label || detail.session.difficulty}</h2>
+                    <p>{formatDateTime(detail.session.created_at)} 开始，状态：{STATUS_LABELS[detail.session.status] || detail.session.status}</p>
+                  </div>
+                  <span className="system-pill">{qaPairs.length} 轮 QA</span>
+                </div>
+
+                <div className="qa-list">
+                  {qaPairs.length === 0 && <div className="history-empty">这次面试还没有可回看的 QA。</div>}
+                  {qaPairs.map((pair, index) => (
+                    <article className="qa-card" key={`${pair.question.seq}-${index}`}>
+                      <div className="qa-card-head">
+                        <span>Q{index + 1}</span>
+                        <small>{formatDateTime(pair.question.created_at)}</small>
+                      </div>
+                      <div className="qa-message user">
+                        <strong>我的回答</strong>
+                        <p>{pair.question.content}</p>
+                      </div>
+                      <div className="qa-message ai">
+                        <strong>AI 面试官</strong>
+                        <p>{pair.answer?.content || '这轮还没有 AI 回复。'}</p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </>
+            )}
+            {activeSession && !detail && !loadingDetail && (
+              <div className="history-detail-empty">
+                <h2>{DOMAIN_LABELS[activeSession.domain] || activeSession.domain}</h2>
+                <p>详情暂未加载，请重新选择该记录。</p>
+              </div>
+            )}
           </section>
         </main>
       </div>
@@ -681,7 +940,7 @@ function ChatView({
   sessionId: string;
   domain: string;
   difficulty: string;
-  onEnd: () => void;
+  onEnd: () => Promise<void>;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -744,7 +1003,7 @@ function ChatView({
 
   const handleEnd = () => {
     abortRef.current?.abort();
-    onEnd();
+    void onEnd();
   };
 
   const diffLabel = DIFFICULTY_OPTIONS.find((d) => d.value === difficulty)?.label || difficulty;
@@ -896,7 +1155,10 @@ function App() {
     }
   };
 
-  const handleEnd = () => {
+  const handleEnd = async () => {
+    if (sessionId) {
+      await endInterviewSession(sessionId).catch(() => undefined);
+    }
     setView('dashboard');
     setSessionId('');
   };
@@ -946,16 +1208,8 @@ function App() {
         />
       )}
       {view === 'history' && (
-        <PlaceholderView
+        <HistoryView
           username={username}
-          title="历史面试记录"
-          eyebrow="History"
-          description="这个页面先作为过往面试入口预留。后续接入后，可查看每次练习的方向、难度、会话状态和关键问题。"
-          blocks={[
-            { label: 'Records', title: '面试列表', description: '按时间展示面试方向、难度、开始时间和结束状态。' },
-            { label: 'Messages', title: '对话回看', description: '进入单次记录后查看问题、回答和追问链路。' },
-            { label: 'Export', title: '记录导出', description: '后续可按需导出复盘材料或训练摘要。' },
-          ]}
           onHome={goHome}
           onStartInterview={() => setView('setup')}
           onLogout={handleLogout}

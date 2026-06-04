@@ -1,5 +1,27 @@
 const API_BASE = '/api';
 
+export interface InterviewSessionSummary {
+  id: string;
+  domain: string;
+  difficulty: string;
+  status: string;
+  created_at: string;
+  ended_at: string | null;
+  message_count: number;
+}
+
+export interface InterviewMessage {
+  role: 'user' | 'ai';
+  content: string;
+  seq: number;
+  created_at: string;
+}
+
+export interface InterviewSessionDetail {
+  session: Omit<InterviewSessionSummary, 'message_count'>;
+  messages: InterviewMessage[];
+}
+
 function authHeaders(): Record<string, string> {
   return { 'Content-Type': 'application/json' };
 }
@@ -81,6 +103,49 @@ export async function createSession(domain: string, difficulty: string, jobDescr
   }
   const data = await res.json();
   return data.session_id;
+}
+
+export async function fetchInterviewSessions(limit: number = 50): Promise<InterviewSessionSummary[]> {
+  const res = await fetch(`${API_BASE}/sessions?limit=${limit}`, {
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to fetch interview sessions');
+  }
+  const data = await res.json();
+  return data.sessions || [];
+}
+
+export async function fetchInterviewSessionDetail(sessionId: string): Promise<InterviewSessionDetail> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to fetch interview session');
+  }
+  return res.json();
+}
+
+export async function endInterviewSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/end`, {
+    method: 'POST',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok && res.status !== 404) {
+    throw new Error('Failed to end interview session');
+  }
 }
 
 export function streamChat(

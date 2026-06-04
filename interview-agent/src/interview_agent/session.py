@@ -9,8 +9,8 @@ from interview_agent.agent import build_interview_agent
 from interview_agent.db import (
     create_message,
     create_session,
-    delete_expired_sessions,
     delete_session_for_user,
+    expire_stale_sessions,
     get_next_message_seq,
     get_session_for_user,
     get_session_messages,
@@ -52,7 +52,7 @@ class SessionManager:
         structured_jd: str = "",
         structured_profile: str = "",
     ) -> str:
-        await delete_expired_sessions()
+        await expire_stale_sessions()
         self._evict_agents()
 
         agent = await build_interview_agent(domain, difficulty, structured_jd, structured_profile)
@@ -125,6 +125,7 @@ class SessionManager:
 
     async def end_session(self, session_id: str) -> None:
         await update_session_status(session_id, "completed")
+        self._agents.pop(session_id, None)
 
     async def delete(self, session_id: str, username: str, user_id: int) -> bool:
         ses = self._agents.get(session_id)

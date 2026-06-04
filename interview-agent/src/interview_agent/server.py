@@ -16,7 +16,7 @@ from slowapi.util import get_remote_address
 
 from interview_agent.auth import authenticate, get_current_user, register
 from interview_agent.config import auth_settings, llm_settings, server_settings, vectordb_settings
-from interview_agent.db import get_user_by_username, init_db
+from interview_agent.db import get_session_for_user, get_session_messages, get_user_by_username, init_db, list_user_sessions
 from interview_agent.logging_config import setup_logging
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS
@@ -318,14 +318,57 @@ async def create_session(
     return {"session_id": session_id}
 
 
+async def _get_current_user_row(username: str) -> dict:
+    user = await get_user_by_username(username)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+@app.get("/api/sessions")
+async def list_sessions(username: str = Depends(get_current_user), limit: int = 20) -> dict:
+    user = await _get_current_user_row(username)
+    safe_limit = max(1, min(limit, 100))
+    sessions = await list_user_sessions(user["id"], safe_limit)
+    return {"sessions": sessions}
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session_detail(session_id: str, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    messages = await get_session_messages(session_id)
+    return {
+        "session": {
+            "id": session["id"],
+            "domain": session["domain"],
+            "difficulty": session["difficulty"],
+            "status": session["status"],
+            "created_at": session["created_at"],
+            "ended_at": session["ended_at"],
+        },
+        "messages": messages,
+    }
+
+
+@app.post("/api/sessions/{session_id}/end")
+async def end_session(session_id: str, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    await session_manager.end_session(session_id)
+    return {"ok": True}
+
+
 @app.post("/api/chat/stream")
 async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user)):
     if len(req.message) > _MAX_MESSAGE_LEN:
         raise HTTPException(status_code=400, detail="Message too long")
 
-    user = await get_user_by_username(username)
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
+    user = await _get_current_user_row(username)
 
     ses = await session_manager.get_or_rebuild_agent(req.session_id, username, user["id"])
     if ses is None:
@@ -375,9 +418,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 async def delete_session(
     session_id: str, username: str = Depends(get_current_user)
 ) -> dict:
-    user = await get_user_by_username(username)
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
+    user = await _get_current_user_row(username)
     deleted = await session_manager.delete(session_id, username, user["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")

@@ -3,7 +3,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from interview_agent.db import (
+    create_message,
+    create_session,
     create_user,
+    expire_stale_sessions,
+    get_db,
     get_next_message_seq,
     get_session,
     get_session_messages,
@@ -134,3 +138,30 @@ async def test_append_message_uses_monotonic_seq_after_trim(mock_agent_build, is
     assert rows[0]["content"] == "m5"
     assert rows[-1]["seq"] == 204
     assert await get_next_message_seq(sid) == 205
+
+
+async def test_expire_stale_sessions_keeps_history(isolate_env):
+    await init_db()
+    user_id = await _make_user("alice")
+    await create_session("old-session", user_id, "alice", "backend", "mid")
+    await create_message("old-session", "user", "hello", 0)
+    await create_message("old-session", "ai", "hi", 1)
+
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE sessions SET created_at = datetime('now', '-2 hours') WHERE id = ?",
+            ("old-session",),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    expired = await expire_stale_sessions()
+
+    assert expired == 1
+    row = await get_session("old-session")
+    assert row is not None
+    assert row["status"] == "expired"
+    messages = await get_session_messages("old-session")
+    assert [m["content"] for m in messages] == ["hello", "hi"]
