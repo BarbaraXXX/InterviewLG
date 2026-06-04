@@ -148,6 +148,49 @@ export async function endInterviewSession(sessionId: string): Promise<void> {
   }
 }
 
+export async function pauseInterviewSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/pause`, {
+    method: 'POST',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to pause interview session');
+  }
+}
+
+export async function resumeInterviewSession(sessionId: string): Promise<InterviewSessionDetail> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/resume`, {
+    method: 'POST',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to resume interview session');
+  }
+  return res.json();
+}
+
+export async function deleteInterviewSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to delete interview session');
+  }
+}
+
 export function streamChat(
   sessionId: string,
   message: string,

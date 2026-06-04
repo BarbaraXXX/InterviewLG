@@ -12,6 +12,7 @@ from interview_agent.db import (
     get_session,
     get_session_messages,
     init_db,
+    list_user_sessions,
 )
 from interview_agent.session import SessionManager
 
@@ -107,6 +108,45 @@ async def test_session_manager_delete_wrong_user(mock_agent_build, isolate_env):
     assert await mgr.delete(sid, "bob", bob_id) is False
     assert mgr.get_agent(sid, "alice") is not None
     assert await get_session(sid) is not None
+
+
+async def test_session_manager_pause_and_resume(mock_agent_build, isolate_env):
+    await init_db()
+    user_id = await _make_user("alice")
+    mgr = SessionManager()
+    sid = await mgr.create("backend", "mid", "alice", user_id, "jd", "profile")
+
+    await mgr.pause_session(sid)
+    paused = await get_session(sid)
+    assert paused["status"] == "paused"
+    assert mgr.get_agent(sid, "alice") is None
+    assert await mgr.get_or_rebuild_agent(sid, "alice", user_id) is None
+
+    resumed = await mgr.resume_session(sid, "alice", user_id)
+    assert resumed is not None
+    assert resumed.domain == "backend"
+    assert resumed.difficulty == "mid"
+    assert sid in mgr._agents
+    row = await get_session(sid)
+    assert row["status"] == "active"
+    assert mock_agent_build[-1][0] == ("backend", "mid", "jd", "profile")
+
+
+async def test_session_manager_trims_user_sessions(mock_agent_build, isolate_env):
+    await init_db()
+    user_id = await _make_user("alice")
+    mgr = SessionManager()
+    created = []
+    for i in range(55):
+        sid = await mgr.create("backend", "mid", "alice", user_id)
+        created.append(sid)
+
+    rows = await list_user_sessions(user_id, 100)
+    ids = {row["id"] for row in rows}
+    assert len(rows) == 50
+    assert created[-1] in ids
+    assert created[0] not in ids
+    assert created[0] not in mgr._agents
 
 
 async def test_session_manager_max_agents(mock_agent_build, isolate_env):

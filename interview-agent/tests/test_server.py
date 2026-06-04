@@ -5,7 +5,14 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from interview_agent import server as server_module
 from interview_agent.auth import get_current_user
-from interview_agent.db import create_message, create_session as db_create_session, create_user, get_session, init_db
+from interview_agent.db import (
+    create_message,
+    create_session as db_create_session,
+    create_user,
+    get_session,
+    init_db,
+    update_session_status,
+)
 from interview_agent.jd_parser import StructuredJD
 
 
@@ -156,6 +163,81 @@ def test_end_session_marks_completed(auth_client):
     row = anyio.run(get_session, "sid-1")
     assert row["status"] == "completed"
     assert row["ended_at"] is not None
+
+
+def test_pause_session_marks_paused(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+
+    anyio.run(seed)
+
+    resp = auth_client.post("/api/sessions/sid-1/pause")
+
+    assert resp.status_code == 200
+    row = anyio.run(get_session, "sid-1")
+    assert row["status"] == "paused"
+    assert row["ended_at"] is None
+
+
+def test_resume_session_returns_messages(auth_client, monkeypatch):
+    import anyio
+    from unittest.mock import MagicMock
+
+    async def fake_build(*args, **kwargs):
+      return MagicMock()
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-1", user_id, "tester", "backend", "mid", "jd", "profile")
+      await update_session_status("sid-1", "paused")
+      await create_message("sid-1", "user", "上一轮回答", 0)
+      await create_message("sid-1", "ai", "上一轮追问", 1)
+
+    monkeypatch.setattr("interview_agent.session.build_interview_agent", fake_build)
+    anyio.run(seed)
+
+    resp = auth_client.post("/api/sessions/sid-1/resume")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session"]["status"] == "active"
+    assert [m["content"] for m in body["messages"]] == ["上一轮回答", "上一轮追问"]
+    row = anyio.run(get_session, "sid-1")
+    assert row["status"] == "active"
+
+
+def test_resume_completed_session_rejected(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await update_session_status("sid-1", "completed")
+
+    anyio.run(seed)
+
+    resp = auth_client.post("/api/sessions/sid-1/resume")
+
+    assert resp.status_code == 409
+
+
+def test_delete_session_removes_history(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await create_message("sid-1", "user", "delete me", 0)
+
+    anyio.run(seed)
+
+    resp = auth_client.delete("/api/sessions/sid-1")
+
+    assert resp.status_code == 200
+    assert anyio.run(get_session, "sid-1") is None
 
 
 def test_sanitize_path_segment_normal():

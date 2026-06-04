@@ -15,6 +15,7 @@ from interview_agent.db import (
     get_session_for_user,
     get_session_messages,
     trim_session_messages,
+    trim_user_sessions,
     update_session_status,
 )
 
@@ -69,6 +70,9 @@ class SessionManager:
         )
 
         self._agents[session_id] = InterviewSession(agent, domain, difficulty, username)
+        trimmed_ids = await trim_user_sessions(user_id)
+        for trimmed_id in trimmed_ids:
+            self._agents.pop(trimmed_id, None)
         self._evict_agents()
         logger.info("session created id=%s user=%s domain=%s difficulty=%s", session_id, username, domain, difficulty)
         return session_id
@@ -126,6 +130,28 @@ class SessionManager:
     async def end_session(self, session_id: str) -> None:
         await update_session_status(session_id, "completed")
         self._agents.pop(session_id, None)
+
+    async def pause_session(self, session_id: str) -> None:
+        await update_session_status(session_id, "paused")
+        self._agents.pop(session_id, None)
+
+    async def resume_session(self, session_id: str, username: str, user_id: int) -> InterviewSession | None:
+        row = await get_session_for_user(session_id, user_id)
+        if row is None or row["status"] != "paused":
+            return None
+
+        agent = await build_interview_agent(
+            row["domain"],
+            row["difficulty"],
+            row["structured_jd"],
+            row["structured_profile"],
+        )
+        await update_session_status(session_id, "active")
+        ses = InterviewSession(agent, row["domain"], row["difficulty"], username)
+        self._agents[session_id] = ses
+        self._evict_agents()
+        logger.info("session resumed id=%s user=%s", session_id, username)
+        return ses
 
     async def delete(self, session_id: str, username: str, user_id: int) -> bool:
         ses = self._agents.get(session_id)

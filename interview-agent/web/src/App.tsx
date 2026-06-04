@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSession,
+  deleteInterviewSession,
   endInterviewSession,
   fetchDomains,
   fetchInterviewSessionDetail,
@@ -9,7 +10,9 @@ import {
   getMe,
   login,
   logout,
+  pauseInterviewSession,
   register,
+  resumeInterviewSession,
   streamChat,
   type InterviewMessage,
   type InterviewSessionDetail,
@@ -89,6 +92,7 @@ const getDomainDescription = (domain: string) =>
 
 const STATUS_LABELS: Record<string, string> = {
   active: '进行中',
+  paused: '已中断',
   completed: '已结束',
   expired: '已过期',
 };
@@ -128,6 +132,13 @@ function toQaPairs(messages: InterviewMessage[]) {
   }
 
   return pairs;
+}
+
+function toChatMessages(messages: InterviewMessage[]): Message[] {
+  return messages.map((message) => ({
+    role: message.role,
+    content: message.content,
+  }));
 }
 
 function LogoMark() {
@@ -542,11 +553,13 @@ function HistoryView({
   username,
   onHome,
   onStartInterview,
+  onResumeInterview,
   onLogout,
 }: {
   username: string;
   onHome: () => void;
   onStartInterview: () => void;
+  onResumeInterview: (detail: InterviewSessionDetail) => void;
   onLogout: () => void;
 }) {
   const [sessions, setSessions] = useState<InterviewSessionSummary[]>([]);
@@ -554,6 +567,7 @@ function HistoryView({
   const [detail, setDetail] = useState<InterviewSessionDetail | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
 
   const loadSessions = useCallback(async () => {
@@ -602,6 +616,7 @@ function HistoryView({
   const selectSession = async (sessionId: string) => {
     setSelectedId(sessionId);
     setLoadingDetail(true);
+    setDetail(null);
     setError('');
     try {
       const data = await fetchInterviewSessionDetail(sessionId);
@@ -614,6 +629,47 @@ function HistoryView({
       }
     } finally {
       setLoadingDetail(false);
+    }
+  };
+
+  const deleteSelectedSession = async () => {
+    if (!selectedId) return;
+    if (!window.confirm('确定删除这条面试记录吗？删除后无法恢复。')) {
+      return;
+    }
+    setActionLoading(true);
+    setError('');
+    try {
+      await deleteInterviewSession(selectedId);
+      setSessions((prev) => prev.filter((session) => session.id !== selectedId));
+      setSelectedId('');
+      setDetail(null);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setError('删除面试记录失败，请稍后重试。');
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const resumeSelectedSession = async () => {
+    if (!selectedId || detail?.session.status !== 'paused') return;
+    setActionLoading(true);
+    setError('');
+    try {
+      const resumed = await resumeInterviewSession(selectedId);
+      onResumeInterview(resumed);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setError('继续面试失败，请刷新后重试。');
+      }
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -680,7 +736,23 @@ function HistoryView({
                     <h2>{DOMAIN_LABELS[detail.session.domain] || detail.session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === detail.session.difficulty)?.label || detail.session.difficulty}</h2>
                     <p>{formatDateTime(detail.session.created_at)} 开始，状态：{STATUS_LABELS[detail.session.status] || detail.session.status}</p>
                   </div>
-                  <span className="system-pill">{qaPairs.length} 轮 QA</span>
+                  <div className="history-detail-actions">
+                    <span className="system-pill">{qaPairs.length} 轮 QA</span>
+                    <button
+                      className="inline-start-button"
+                      onClick={() => void resumeSelectedSession()}
+                      disabled={detail.session.status !== 'paused' || actionLoading}
+                    >
+                      继续面试
+                    </button>
+                    <button
+                      className="danger-button"
+                      onClick={() => void deleteSelectedSession()}
+                      disabled={actionLoading}
+                    >
+                      删除记录
+                    </button>
+                  </div>
                 </div>
 
                 <div className="qa-list">
@@ -976,14 +1048,18 @@ function ChatView({
   sessionId,
   domain,
   difficulty,
+  initialMessages,
+  onPause,
   onEnd,
 }: {
   sessionId: string;
   domain: string;
   difficulty: string;
+  initialMessages: Message[];
+  onPause: () => Promise<void>;
   onEnd: () => Promise<void>;
 }) {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(() => initialMessages);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
@@ -1047,6 +1123,11 @@ function ChatView({
     void onEnd();
   };
 
+  const handlePause = () => {
+    abortRef.current?.abort();
+    void onPause();
+  };
+
   const diffLabel = DIFFICULTY_OPTIONS.find((d) => d.value === difficulty)?.label || difficulty;
 
   return (
@@ -1058,9 +1139,14 @@ function ChatView({
           <span className="chat-header-sep">/</span>
           <span className="chat-header-diff">{diffLabel}</span>
         </div>
-        <button className="end-button" onClick={handleEnd}>
-          结束面试
-        </button>
+        <div className="chat-header-actions">
+          <button className="pause-button" onClick={handlePause}>
+            中断面试
+          </button>
+          <button className="end-button" onClick={handleEnd}>
+            结束面试
+          </button>
+        </div>
       </header>
 
       <div className="chat-messages">
@@ -1144,6 +1230,7 @@ function App() {
   const [domain, setDomain] = useState('');
   const [difficulty, setDifficulty] = useState('');
   const [username, setUsername] = useState('');
+  const [chatMessages, setChatMessages] = useState<Message[]>([]);
 
   useEffect(() => {
     if (!hasActiveBrowserSession()) {
@@ -1186,6 +1273,7 @@ function App() {
       setSessionId(sid);
       setDomain(d);
       setDifficulty(diff);
+      setChatMessages([]);
       setView('chat');
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
@@ -1202,10 +1290,38 @@ function App() {
     }
     setView('dashboard');
     setSessionId('');
+    setChatMessages([]);
+  };
+
+  const handlePause = async () => {
+    try {
+      if (sessionId) {
+        await pauseInterviewSession(sessionId);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        await handleLogout();
+      } else {
+        alert('中断面试失败，请稍后重试');
+      }
+      return;
+    }
+    setView('dashboard');
+    setSessionId('');
+    setChatMessages([]);
+  };
+
+  const handleResume = (detail: InterviewSessionDetail) => {
+    setSessionId(detail.session.id);
+    setDomain(detail.session.domain);
+    setDifficulty(detail.session.difficulty);
+    setChatMessages(toChatMessages(detail.messages));
+    setView('chat');
   };
 
   const goHome = () => {
     setSessionId('');
+    setChatMessages([]);
     setView('dashboard');
   };
 
@@ -1231,7 +1347,16 @@ function App() {
           onBack={goHome}
         />
       )}
-      {view === 'chat' && <ChatView sessionId={sessionId} domain={domain} difficulty={difficulty} onEnd={handleEnd} />}
+      {view === 'chat' && (
+        <ChatView
+          sessionId={sessionId}
+          domain={domain}
+          difficulty={difficulty}
+          initialMessages={chatMessages}
+          onPause={handlePause}
+          onEnd={handleEnd}
+        />
+      )}
       {view === 'profile' && (
         <PlaceholderView
           username={username}
@@ -1253,6 +1378,7 @@ function App() {
           username={username}
           onHome={goHome}
           onStartInterview={() => setView('setup')}
+          onResumeInterview={handleResume}
           onLogout={handleLogout}
         />
       )}

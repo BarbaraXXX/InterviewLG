@@ -277,6 +277,18 @@ async def list_profiles(username: str = Depends(get_current_user)) -> dict:
 
 _MAX_PROFILE_SIZE = 2000
 
+
+def _serialize_session(session: dict) -> dict:
+    return {
+        "id": session["id"],
+        "domain": session["domain"],
+        "difficulty": session["difficulty"],
+        "status": session["status"],
+        "created_at": session["created_at"],
+        "ended_at": session["ended_at"],
+    }
+
+
 @app.post("/api/sessions")
 async def create_session(
     req: CreateSessionRequest, username: str = Depends(get_current_user)
@@ -341,14 +353,7 @@ async def get_session_detail(session_id: str, username: str = Depends(get_curren
         raise HTTPException(status_code=404, detail="Session not found")
     messages = await get_session_messages(session_id)
     return {
-        "session": {
-            "id": session["id"],
-            "domain": session["domain"],
-            "difficulty": session["difficulty"],
-            "status": session["status"],
-            "created_at": session["created_at"],
-            "ended_at": session["ended_at"],
-        },
+        "session": _serialize_session(session),
         "messages": messages,
     }
 
@@ -361,6 +366,39 @@ async def end_session(session_id: str, username: str = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Session not found")
     await session_manager.end_session(session_id)
     return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/pause")
+async def pause_session(session_id: str, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session["status"] != "active":
+        raise HTTPException(status_code=409, detail="Only active sessions can be paused")
+    await session_manager.pause_session(session_id)
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{session_id}/resume")
+async def resume_session(session_id: str, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session["status"] != "paused":
+        raise HTTPException(status_code=409, detail="Only paused sessions can be resumed")
+    resumed = await session_manager.resume_session(session_id, username, user["id"])
+    if resumed is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    updated = await get_session_for_user(session_id, user["id"])
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    messages = await get_session_messages(session_id)
+    return {
+        "session": _serialize_session(updated),
+        "messages": messages,
+    }
 
 
 @app.post("/api/chat/stream")
