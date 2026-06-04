@@ -1,13 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSession,
+  createResume,
   deleteInterviewSession,
   deleteInterviewSessions,
+  deleteResume,
   endInterviewSession,
   fetchDomains,
   fetchInterviewSessionDetail,
   fetchInterviewSessions,
   fetchProfiles,
+  fetchResumes,
   getMe,
   login,
   logout,
@@ -15,9 +18,12 @@ import {
   register,
   resumeInterviewSession,
   streamChat,
+  updateResume,
   type InterviewMessage,
   type InterviewSessionDetail,
   type InterviewSessionSummary,
+  type Resume,
+  type ResumeProject,
 } from './api';
 import { RELEASE_NOTES } from './releaseNotes';
 
@@ -166,6 +172,28 @@ function toChatMessages(messages: InterviewMessage[]): Message[] {
     role: message.role,
     content: message.content,
   }));
+}
+
+function summarizeText(value: string, maxLength = 96): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '未填写';
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+}
+
+function resumeMeta(resume: Resume): string {
+  const parts = [];
+  if (resume.projects.length > 0) parts.push(`${resume.projects.length} 个项目`);
+  if (resume.skills.trim()) parts.push('技能特长');
+  return parts.length ? parts.join(' / ') : '未填写内容';
+}
+
+function projectSummary(projects: ResumeProject[], maxLength = 96): string {
+  if (projects.length === 0) return '未填写项目';
+  return summarizeText(projects.map((project) => project.name).join(' / '), maxLength);
+}
+
+function newResumeProject(): ResumeProject {
+  return { name: '', description: '' };
 }
 
 function LogoMark() {
@@ -612,6 +640,335 @@ function PlaceholderView({
   );
 }
 
+function ResumeManagerView({
+  username,
+  onHome,
+  onStartInterview,
+  onLogout,
+}: {
+  username: string;
+  onHome: () => void;
+  onStartInterview: () => void;
+  onLogout: () => void;
+}) {
+  const [resumes, setResumes] = useState<Resume[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<number | 'new' | null>(null);
+  const [title, setTitle] = useState('');
+  const [projects, setProjects] = useState<ResumeProject[]>([newResumeProject()]);
+  const [skills, setSkills] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let ignore = false;
+    fetchResumes()
+      .then((rows) => {
+        if (!ignore) {
+          setResumes(rows);
+        }
+      })
+      .catch((err) => {
+        if (ignore) return;
+        if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+          onLogout();
+        } else {
+          setError('简历信息加载失败，请稍后重试。');
+        }
+      })
+      .finally(() => {
+        if (!ignore) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [onLogout]);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setTitle('');
+    setProjects([newResumeProject()]);
+    setSkills('');
+    setError('');
+  };
+
+  const startCreate = () => {
+    if (resumes.length >= 3) {
+      setError('每个账号最多保存 3 份简历，请先删除不需要的简历。');
+      return;
+    }
+    setEditingId('new');
+    setTitle('');
+    setProjects([newResumeProject()]);
+    setSkills('');
+    setError('');
+  };
+
+  const startEdit = (resume: Resume) => {
+    setEditingId(resume.id);
+    setTitle(resume.title);
+    setProjects(resume.projects.length ? resume.projects : [newResumeProject()]);
+    setSkills(resume.skills);
+    setError('');
+  };
+
+  const updateProject = (index: number, patch: Partial<ResumeProject>) => {
+    setProjects((prev) => prev.map((project, i) => (
+      i === index ? { ...project, ...patch } : project
+    )));
+  };
+
+  const removeProject = (index: number) => {
+    setProjects((prev) => {
+      if (prev.length <= 1) return prev;
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const canAddProject = projects.length < 5
+    && projects.every((project) => project.name.trim() && project.description.trim());
+
+  const addProject = () => {
+    if (!canAddProject) return;
+    setProjects((prev) => [...prev, newResumeProject()]);
+  };
+
+  const saveResume = async () => {
+    const trimmedTitle = title.trim();
+    const trimmedProjects = projects.map((project) => ({
+      name: project.name.trim(),
+      description: project.description.trim(),
+    }));
+    const trimmedSkills = skills.trim();
+    if (!trimmedTitle) {
+      setError('请填写简历名称。');
+      return;
+    }
+    if (trimmedProjects.some((project) => !project.name || !project.description)) {
+      setError('请完整填写每个项目的项目名称和具体描述。');
+      return;
+    }
+    if (trimmedProjects.length < 1) {
+      setError('至少需要填写一个项目经验。');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const saved = editingId === 'new'
+        ? await createResume(trimmedTitle, trimmedProjects, trimmedSkills)
+        : await updateResume(Number(editingId), trimmedTitle, trimmedProjects, trimmedSkills);
+      setResumes((prev) => {
+        const exists = prev.some((resume) => resume.id === saved.id);
+        if (exists) {
+          return prev.map((resume) => (resume.id === saved.id ? saved : resume));
+        }
+        return [saved, ...prev];
+      });
+      resetForm();
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setError(err instanceof Error ? err.message : '保存简历失败，请稍后重试。');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeResume = async (resume: Resume) => {
+    if (!window.confirm(`确定删除「${resume.title}」吗？历史面试中已保存的使用记录不会受影响。`)) {
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await deleteResume(resume.id);
+      setResumes((prev) => prev.filter((item) => item.id !== resume.id));
+      if (editingId === resume.id) {
+        resetForm();
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setError('删除简历失败，请稍后重试。');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isEditing = editingId !== null;
+
+  return (
+    <div className="setup-view">
+      <div className="console-shell profile-shell">
+        <ConsoleTopbar title="完善个人信息" username={username} onLogout={onLogout} onHome={onHome} />
+        <main className="resume-layout">
+          <section className="resume-main">
+            <div className="section-heading">
+              <p className="eyebrow">Resume Context</p>
+              <h1 className="setup-title">简历信息管理</h1>
+              <p className="setup-subtitle">
+                每个账号最多保存 3 份纯文本简历，只记录项目经验和技能特长，用于让模拟面试更贴近你的经历。
+              </p>
+            </div>
+
+            <div className="privacy-notice">
+              <strong>隐私提醒</strong>
+              <p>
+                本站只保存你主动填写的项目经验和技能特长，用于生成模拟面试问题。请不要填写手机号、邮箱、身份证号、住址、账号密码、薪资等敏感信息。
+              </p>
+            </div>
+
+            <div className="resume-toolbar">
+              <span>{resumes.length}/3 份简历</span>
+              <button className="inline-start-button" onClick={startCreate} disabled={resumes.length >= 3 || saving}>
+                新增简历
+              </button>
+            </div>
+
+            {error && <div className="login-error" role="alert">{error}</div>}
+
+            <div className="resume-cards" aria-label="已保存简历">
+              {loading && <div className="history-empty">正在加载简历信息...</div>}
+              {!loading && resumes.length === 0 && (
+                <div className="history-empty">
+                  <strong>暂无简历信息</strong>
+                  <span>补充项目经验和技能特长后，可以在面试配置页选择使用。</span>
+                  <button className="inline-start-button" onClick={startCreate}>创建第一份简历</button>
+                </div>
+              )}
+              {!loading && resumes.map((resume) => (
+                <article className="resume-card" key={resume.id}>
+                  <div>
+                    <span>{resumeMeta(resume)}</span>
+                    <h2>{resume.title}</h2>
+                    <p>{projectSummary(resume.projects)}</p>
+                  </div>
+                  <div className="resume-card-actions">
+                    <button className="secondary-button" onClick={() => startEdit(resume)} disabled={saving}>编辑</button>
+                    <button className="danger-button" onClick={() => void removeResume(resume)} disabled={saving}>删除</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <aside className="resume-editor">
+            <div className="section-heading">
+              <p className="eyebrow">Editor</p>
+              <h2>{isEditing ? '编辑简历' : '选择一份简历进行编辑'}</h2>
+              <p>建议只写和面试追问有关的项目、职责、技术栈、难点和成果。</p>
+            </div>
+
+            {isEditing ? (
+              <div className="resume-form">
+                <label>
+                  <span>简历名称</span>
+                  <input
+                    className="custom-input"
+                    value={title}
+                    maxLength={60}
+                    onChange={(e) => setTitle(e.target.value)}
+                    placeholder="例如：后端实习版、C++ 项目版"
+                  />
+                </label>
+                <div className="resume-projects-editor">
+                  <div className="resume-projects-head">
+                    <span>项目经验</span>
+                    <small>{projects.length}/5 个项目</small>
+                  </div>
+                  {projects.map((project, index) => (
+                    <div className="resume-project-block" key={index}>
+                      <div className="resume-project-title-row">
+                        <strong>项目 {index + 1}</strong>
+                        {projects.length > 1 && (
+                          <button
+                            className="ghost-link"
+                            type="button"
+                            onClick={() => removeProject(index)}
+                          >
+                            删除
+                          </button>
+                        )}
+                      </div>
+                      <label>
+                        <span>项目名称</span>
+                        <input
+                          className="custom-input"
+                          value={project.name}
+                          maxLength={80}
+                          onChange={(e) => updateProject(index, { name: e.target.value })}
+                          placeholder="例如：订单系统、秒杀模块、权限平台"
+                        />
+                      </label>
+                      <label>
+                        <span>具体描述</span>
+                        <textarea
+                          className="custom-input jd-textarea"
+                          value={project.description}
+                          maxLength={2000}
+                          onChange={(e) => updateProject(index, { description: e.target.value })}
+                          placeholder="描述项目背景、你的职责、技术方案、难点和可被追问的细节..."
+                          rows={5}
+                        />
+                        <small>{project.description.length}/2000</small>
+                      </label>
+                    </div>
+                  ))}
+                  {canAddProject ? (
+                    <button
+                      className="resume-add-project"
+                      type="button"
+                      onClick={addProject}
+                      aria-label="增加项目经验"
+                    >
+                      +
+                    </button>
+                  ) : (
+                    projects.length < 5 && (
+                      <small className="resume-add-hint">完整填写当前项目后，可继续添加项目经验。</small>
+                    )
+                  )}
+                </div>
+                <label>
+                  <span>技能特长</span>
+                  <textarea
+                    className="custom-input jd-textarea"
+                    value={skills}
+                    maxLength={2000}
+                    onChange={(e) => setSkills(e.target.value)}
+                    placeholder="例如：Python、FastAPI、Redis、MySQL、并发编程、性能优化..."
+                    rows={5}
+                  />
+                  <small>{skills.length}/2000</small>
+                </label>
+                <div className="resume-form-actions">
+                  <button className="secondary-button" onClick={resetForm} disabled={saving}>取消</button>
+                  <button className="inline-start-button" onClick={() => void saveResume()} disabled={saving}>
+                    {saving ? '保存中' : '保存简历'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="history-detail-empty">
+                <h2>简历会用于面试上下文</h2>
+                <p>保存后，在面试配置页选择某份简历，Agent 会围绕项目经验和技能特长做更贴近真实面试的追问。</p>
+                <button className="secondary-button" onClick={onStartInterview}>去配置面试</button>
+              </div>
+            )}
+          </aside>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function HistoryView({
   username,
   initialManageMode,
@@ -891,6 +1248,9 @@ function HistoryView({
                     <p className="eyebrow">Interview Detail</p>
                     <h2>{DOMAIN_LABELS[detail.session.domain] || detail.session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === detail.session.difficulty)?.label || detail.session.difficulty}</h2>
                     <p>{formatDateTime(detail.session.created_at)} 开始，状态：{STATUS_LABELS[detail.session.status] || detail.session.status}</p>
+                    {detail.session.resume_title_snapshot && (
+                      <p>本次使用简历：{detail.session.resume_title_snapshot}</p>
+                    )}
                   </div>
                   <div className="history-detail-actions">
                     <span className="system-pill">{qaPairs.length} 轮 QA</span>
@@ -945,15 +1305,26 @@ function HistoryView({
   );
 }
 
-function SetupView({ onStart, username, onLogout, onBack }: {
-  onStart: (domain: string, difficulty: string, jobDescription: string, profileCompany: string, profilePosition: string) => void;
+function SetupView({ onStart, username, onLogout, onBack, onProfile }: {
+  onStart: (
+    domain: string,
+    difficulty: string,
+    jobDescription: string,
+    profileCompany: string,
+    profilePosition: string,
+    resumeId: number | null,
+  ) => void;
   username: string;
   onLogout: () => void;
   onBack: () => void;
+  onProfile: () => void;
 }) {
   const [domains, setDomains] = useState<string[]>(DEFAULT_DOMAINS);
   const [selectedDomain, setSelectedDomain] = useState('');
   const [customDomain, setCustomDomain] = useState('');
+  const [resumes, setResumes] = useState<Resume[]>([]);
+  const [selectedResumeId, setSelectedResumeId] = useState<number | null>(null);
+  const [resumeLoadError, setResumeLoadError] = useState(false);
   const [difficulty, setDifficulty] = useState('mid');
   const [jobDescription, setJobDescription] = useState('');
   const [profiles, setProfiles] = useState<{key: string; company: string; position: string; source_count: number}[]>([]);
@@ -970,9 +1341,25 @@ function SetupView({ onStart, username, onLogout, onBack }: {
     fetchProfiles().then(setProfiles).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    fetchResumes()
+      .then((rows) => {
+        setResumes(rows);
+        setResumeLoadError(false);
+      })
+      .catch((err) => {
+        if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+          onLogout();
+        } else {
+          setResumeLoadError(true);
+        }
+      });
+  }, [onLogout]);
+
   const activeDomain = customDomain || selectedDomain;
   const activeDomainLabel = activeDomain ? (DOMAIN_LABELS[activeDomain] || activeDomain) : '待选择';
   const activeDifficulty = DIFFICULTY_OPTIONS.find((opt) => opt.value === difficulty) || DIFFICULTY_OPTIONS[1];
+  const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
 
   const handleStart = () => {
     if (!activeDomain || !difficulty) return;
@@ -986,7 +1373,7 @@ function SetupView({ onStart, username, onLogout, onBack }: {
       profileCompany = profiles[selectedProfileIdx].company;
       profilePosition = profiles[selectedProfileIdx].position;
     }
-    onStart(activeDomain, difficulty, jobDescription, profileCompany, profilePosition);
+    onStart(activeDomain, difficulty, jobDescription, profileCompany, profilePosition, selectedResumeId);
   };
 
   return (
@@ -1008,22 +1395,29 @@ function SetupView({ onStart, username, onLogout, onBack }: {
                   <small>{activeDomainLabel}</small>
                 </div>
               </li>
-              <li className={difficulty ? 'complete' : 'active'}>
+              <li className={selectedResume ? 'complete' : activeDomain ? 'active' : ''}>
                 <span>02</span>
+                <div>
+                  <strong>简历选择</strong>
+                  <small>{selectedResume ? selectedResume.title : '可选，推荐完善'}</small>
+                </div>
+              </li>
+              <li className={difficulty ? 'complete' : 'active'}>
+                <span>03</span>
                 <div>
                   <strong>面试难度</strong>
                   <small>{activeDifficulty.meta}</small>
                 </div>
               </li>
               <li className={jobDescription.trim() ? 'complete' : ''}>
-                <span>03</span>
+                <span>04</span>
                 <div>
                   <strong>岗位 JD</strong>
                   <small>{jobDescription.trim() ? '已提供岗位信息' : '可选，推荐提供'}</small>
                 </div>
               </li>
               <li className={selectedProfileIdx !== -1 ? 'complete' : ''}>
-                <span>04</span>
+                <span>05</span>
                 <div>
                   <strong>面试偏好</strong>
                   <small>{selectedProfileIdx === -1 ? '默认通用风格' : '已选择偏好'}</small>
@@ -1074,6 +1468,53 @@ function SetupView({ onStart, username, onLogout, onBack }: {
                   onChange={(e) => { setCustomDomain(e.target.value); setSelectedDomain(''); }}
                 />
               </div>
+            </section>
+
+            <section className="config-section">
+              <div className="section-heading">
+                <label className="section-label">简历选择（可选）</label>
+                <p>选择一份简历后，本次面试会围绕项目经验和技能特长调整追问重点。</p>
+              </div>
+              <div className="privacy-notice compact">
+                <strong>隐私提醒</strong>
+                <p>
+                  本站只保存你主动填写的项目经验和技能特长，用于生成模拟面试问题。请不要填写手机号、邮箱、身份证号、住址、账号密码、薪资等敏感信息。
+                </p>
+              </div>
+              {resumeLoadError && <div className="login-error" role="alert">简历信息加载失败，不影响继续配置面试。</div>}
+              {resumes.length === 0 ? (
+                <div className="resume-empty-inline">
+                  <div>
+                    <strong>你还没有保存简历</strong>
+                    <p>完善简历后，可以让项目深挖和技能追问更贴近你的真实经历。</p>
+                  </div>
+                  <button className="secondary-button" onClick={onProfile}>去完善简历</button>
+                </div>
+              ) : (
+                <div className="resume-select-grid">
+                  <button
+                    className={`resume-select-card ${selectedResumeId === null ? 'active' : ''}`}
+                    onClick={() => setSelectedResumeId(null)}
+                    aria-pressed={selectedResumeId === null}
+                  >
+                    <span>Default</span>
+                    <strong>不使用简历</strong>
+                    <small>按技术方向、难度和 JD 生成通用面试问题。</small>
+                  </button>
+                  {resumes.map((resume) => (
+                    <button
+                      key={resume.id}
+                      className={`resume-select-card ${selectedResumeId === resume.id ? 'active' : ''}`}
+                      onClick={() => setSelectedResumeId(resume.id)}
+                      aria-pressed={selectedResumeId === resume.id}
+                    >
+                      <span>{resumeMeta(resume)}</span>
+                      <strong>{resume.title}</strong>
+                      <small>{projectSummary(resume.projects, 72)}</small>
+                    </button>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className="config-section">
@@ -1172,6 +1613,10 @@ function SetupView({ onStart, username, onLogout, onBack }: {
               <div>
                 <span>难度</span>
                 <strong>{activeDifficulty.label}</strong>
+              </div>
+              <div>
+                <span>简历</span>
+                <strong>{selectedResume ? selectedResume.title : '未使用简历'}</strong>
               </div>
               <div>
                 <span>岗位信息</span>
@@ -1432,9 +1877,16 @@ function App() {
     setView('login');
   };
 
-  const handleStart = async (d: string, diff: string, jd: string, profileCompany: string, profilePosition: string) => {
+  const handleStart = async (
+    d: string,
+    diff: string,
+    jd: string,
+    profileCompany: string,
+    profilePosition: string,
+    resumeId: number | null,
+  ) => {
     try {
-      const sid = await createSession(d, diff, jd, profileCompany, profilePosition);
+      const sid = await createSession(d, diff, jd, profileCompany, profilePosition, resumeId);
       setSessionId(sid);
       setDomain(d);
       setDifficulty(diff);
@@ -1531,6 +1983,7 @@ function App() {
           username={username}
           onLogout={handleLogout}
           onBack={goHome}
+          onProfile={() => setView('profile')}
         />
       )}
       {view === 'chat' && (
@@ -1544,16 +1997,8 @@ function App() {
         />
       )}
       {view === 'profile' && (
-        <PlaceholderView
+        <ResumeManagerView
           username={username}
-          title="完善个人信息"
-          eyebrow="Profile"
-          description="这个页面先作为简历与目标岗位信息入口预留。后续接入后，可用你的项目、技术栈和求职目标增强面试问题的个性化程度。"
-          blocks={[
-            { label: 'Profile', title: '基本信息与目标岗位', description: '记录目标方向、期望岗位、经验年限和主要技术栈。' },
-            { label: 'Resume', title: '简历与项目经历', description: '沉淀项目背景、技术职责、难点和可被追问的细节。' },
-            { label: 'Preference', title: '面试偏好', description: '配置重点训练方向、期望强度和需要规避的内容。' },
-          ]}
           onHome={goHome}
           onStartInterview={() => setView('setup')}
           onLogout={handleLogout}

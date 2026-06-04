@@ -4,6 +4,7 @@ export interface InterviewSessionSummary {
   id: string;
   domain: string;
   difficulty: string;
+  resume_title_snapshot: string;
   status: string;
   created_at: string;
   ended_at: string | null;
@@ -20,6 +21,20 @@ export interface InterviewMessage {
 export interface InterviewSessionDetail {
   session: Omit<InterviewSessionSummary, 'message_count'>;
   messages: InterviewMessage[];
+}
+
+export interface ResumeProject {
+  name: string;
+  description: string;
+}
+
+export interface Resume {
+  id: number;
+  title: string;
+  projects: ResumeProject[];
+  skills: string;
+  created_at: string;
+  updated_at: string;
 }
 
 function authHeaders(): Record<string, string> {
@@ -85,7 +100,77 @@ export async function fetchProfiles(): Promise<{key: string; company: string; po
   return data.profiles || [];
 }
 
-export async function createSession(domain: string, difficulty: string, jobDescription: string = '', profileCompany: string = '', profilePosition: string = ''): Promise<string> {
+export async function fetchResumes(): Promise<Resume[]> {
+  const res = await fetch(`${API_BASE}/resumes`, {
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to fetch resumes');
+  }
+  const data = await res.json();
+  return data.resumes || [];
+}
+
+export async function createResume(title: string, projects: ResumeProject[], skills: string): Promise<Resume> {
+  const res = await fetch(`${API_BASE}/resumes`, {
+    method: 'POST',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+    body: JSON.stringify({ title, projects, skills }),
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to create resume');
+  }
+  return data.resume;
+}
+
+export async function updateResume(resumeId: number, title: string, projects: ResumeProject[], skills: string): Promise<Resume> {
+  const res = await fetch(`${API_BASE}/resumes/${resumeId}`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+    body: JSON.stringify({ title, projects, skills }),
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to update resume');
+  }
+  return data.resume;
+}
+
+export async function deleteResume(resumeId: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/resumes/${resumeId}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to delete resume');
+  }
+}
+
+export async function createSession(
+  domain: string,
+  difficulty: string,
+  jobDescription: string = '',
+  profileCompany: string = '',
+  profilePosition: string = '',
+  resumeId: number | null = null,
+): Promise<string> {
   const res = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
     headers: authHeaders(),
@@ -96,6 +181,7 @@ export async function createSession(domain: string, difficulty: string, jobDescr
       job_description: jobDescription,
       profile_company: profileCompany,
       profile_position: profilePosition,
+      resume_id: resumeId,
     }),
   });
   if (res.status === 401) {

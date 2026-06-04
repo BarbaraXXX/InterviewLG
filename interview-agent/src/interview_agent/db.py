@@ -15,6 +15,7 @@ _TTL_SECONDS = 3600
 _MAX_MESSAGES_PER_SESSION = 200
 _MAX_SESSIONS_AFTER_RETENTION = 50
 _MAX_SESSIONS_BEFORE_RETENTION = 55
+_MAX_RESUMES_PER_USER = 3
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -45,10 +46,22 @@ async def init_db() -> None:
                 difficulty TEXT NOT NULL,
                 structured_jd TEXT NOT NULL DEFAULT '',
                 structured_profile TEXT NOT NULL DEFAULT '',
+                resume_title_snapshot TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 ended_at TEXT,
                 FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS resumes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                projects TEXT NOT NULL DEFAULT '',
+                skills TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -64,11 +77,21 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(id, user_id);
+            CREATE INDEX IF NOT EXISTS idx_resumes_user ON resumes(user_id, updated_at);
         """)
+        await _ensure_column(db, "sessions", "resume_title_snapshot", "TEXT NOT NULL DEFAULT ''")
         await db.commit()
         logger.info("database initialized at %s", _DB_PATH)
     finally:
         await db.close()
+
+
+async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, definition: str) -> None:
+    async with db.execute(f"PRAGMA table_info({table})") as cursor:
+        rows = await cursor.fetchall()
+    if any(row["name"] == column for row in rows):
+        return
+    await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 # ── users ──────────────────────────────────────────────────────────
@@ -126,13 +149,24 @@ async def create_session(
     difficulty: str,
     structured_jd: str = "",
     structured_profile: str = "",
+    resume_title_snapshot: str = "",
 ) -> None:
     db = await get_db()
     try:
         await db.execute(
-            "INSERT INTO sessions (id, user_id, username, domain, difficulty, structured_jd, structured_profile) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (session_id, user_id, username, domain, difficulty, structured_jd, structured_profile),
+            "INSERT INTO sessions "
+            "(id, user_id, username, domain, difficulty, structured_jd, structured_profile, resume_title_snapshot) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                session_id,
+                user_id,
+                username,
+                domain,
+                difficulty,
+                structured_jd,
+                structured_profile,
+                resume_title_snapshot,
+            ),
         )
         await db.commit()
         logger.info("session created id=%s user=%s", session_id, username)
@@ -145,7 +179,7 @@ async def get_session(session_id: str) -> dict | None:
     try:
         async with db.execute(
             "SELECT id, user_id, username, domain, difficulty, structured_jd, structured_profile, "
-            "status, created_at, ended_at FROM sessions WHERE id = ?",
+            "resume_title_snapshot, status, created_at, ended_at FROM sessions WHERE id = ?",
             (session_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -159,7 +193,7 @@ async def get_session_for_user(session_id: str, user_id: int) -> dict | None:
     try:
         async with db.execute(
             "SELECT id, user_id, username, domain, difficulty, structured_jd, structured_profile, "
-            "status, created_at, ended_at FROM sessions WHERE id = ? AND user_id = ?",
+            "resume_title_snapshot, status, created_at, ended_at FROM sessions WHERE id = ? AND user_id = ?",
             (session_id, user_id),
         ) as cursor:
             row = await cursor.fetchone()
@@ -224,7 +258,7 @@ async def list_user_sessions(user_id: int, limit: int = 20) -> list[dict]:
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT s.id, s.domain, s.difficulty, s.status, s.created_at, s.ended_at, "
+            "SELECT s.id, s.domain, s.difficulty, s.resume_title_snapshot, s.status, s.created_at, s.ended_at, "
             "COUNT(m.id) AS message_count "
             "FROM sessions s "
             "LEFT JOIN messages m ON m.session_id = s.id "
@@ -307,6 +341,99 @@ async def delete_sessions_for_user(session_ids: list[str], user_id: int) -> list
         await db.commit()
         logger.info("sessions deleted count=%d user_id=%s", len(owned_ids), user_id)
         return owned_ids
+    finally:
+        await db.close()
+
+
+# ── resumes ────────────────────────────────────────────────────────
+
+
+async def list_user_resumes(user_id: int) -> list[dict]:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, user_id, title, projects, skills, created_at, updated_at "
+            "FROM resumes WHERE user_id = ? ORDER BY datetime(updated_at) DESC, id DESC",
+            (user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def count_user_resumes(user_id: int) -> int:
+    db = await get_db()
+    try:
+        async with db.execute("SELECT COUNT(*) AS cnt FROM resumes WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            return row["cnt"] if row else 0
+    finally:
+        await db.close()
+
+
+async def get_resume_for_user(resume_id: int, user_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, user_id, title, projects, skills, created_at, updated_at "
+            "FROM resumes WHERE id = ? AND user_id = ?",
+            (resume_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def create_resume(user_id: int, title: str, projects: str, skills: str) -> dict:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "INSERT INTO resumes (user_id, title, projects, skills) VALUES (?, ?, ?, ?)",
+            (user_id, title, projects, skills),
+        )
+        await db.commit()
+        resume_id = cursor.lastrowid
+        logger.info("resume created id=%s user_id=%s", resume_id, user_id)
+    finally:
+        await db.close()
+
+    resume = await get_resume_for_user(int(resume_id), user_id)
+    if resume is None:
+        raise RuntimeError("Resume was not persisted")
+    return resume
+
+
+async def update_resume(resume_id: int, user_id: int, title: str, projects: str, skills: str) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "UPDATE resumes SET title = ?, projects = ?, skills = ?, updated_at = datetime('now') "
+            "WHERE id = ? AND user_id = ?",
+            (title, projects, skills, resume_id, user_id),
+        )
+        await db.commit()
+        if cursor.rowcount <= 0:
+            return None
+        logger.info("resume updated id=%s user_id=%s", resume_id, user_id)
+    finally:
+        await db.close()
+    return await get_resume_for_user(resume_id, user_id)
+
+
+async def delete_resume_for_user(resume_id: int, user_id: int) -> bool:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "DELETE FROM resumes WHERE id = ? AND user_id = ?",
+            (resume_id, user_id),
+        )
+        await db.commit()
+        deleted = cursor.rowcount > 0
+        if deleted:
+            logger.info("resume deleted id=%s user_id=%s", resume_id, user_id)
+        return deleted
     finally:
         await db.close()
 

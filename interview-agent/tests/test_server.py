@@ -1,4 +1,6 @@
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -7,6 +9,7 @@ from interview_agent import server as server_module
 from interview_agent.auth import get_current_user
 from interview_agent.db import (
     create_message,
+    create_resume as db_create_resume,
     create_session as db_create_session,
     create_user,
     get_session,
@@ -14,6 +17,9 @@ from interview_agent.db import (
     update_session_status,
 )
 from interview_agent.jd_parser import StructuredJD
+
+
+RESUME_PROJECTS = [{"name": "订单系统", "description": "负责缓存和接口设计"}]
 
 
 @pytest.fixture
@@ -86,6 +92,157 @@ def test_list_domains(client):
     assert "presets" in body
     assert "backend" in body["presets"]
     assert len(body["presets"]) == 8
+
+
+def test_resume_crud(auth_client):
+    import anyio
+
+    async def seed():
+        await create_user("tester", "hash")
+
+    anyio.run(seed)
+
+    created = auth_client.post(
+        "/api/resumes",
+        json={"title": "后端实习版", "projects": RESUME_PROJECTS, "skills": "Python, Redis"},
+    )
+    assert created.status_code == 200
+    resume = created.json()["resume"]
+    assert resume["title"] == "后端实习版"
+    assert resume["projects"] == RESUME_PROJECTS
+
+    listed = auth_client.get("/api/resumes")
+    assert listed.status_code == 200
+    assert [item["title"] for item in listed.json()["resumes"]] == ["后端实习版"]
+
+    updated = auth_client.put(
+        f"/api/resumes/{resume['id']}",
+        json={
+            "title": "后端正式版",
+            "projects": [{"name": "支付系统", "description": "负责支付回调和幂等处理"}],
+            "skills": "FastAPI",
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["resume"]["projects"][0]["name"] == "支付系统"
+
+    deleted = auth_client.delete(f"/api/resumes/{resume['id']}")
+    assert deleted.status_code == 200
+    assert auth_client.get("/api/resumes").json()["resumes"] == []
+
+
+def test_resume_create_limit(auth_client):
+    import anyio
+
+    async def seed():
+        await create_user("tester", "hash")
+
+    anyio.run(seed)
+
+    for i in range(3):
+        resp = auth_client.post(
+            "/api/resumes",
+            json={"title": f"简历{i}", "projects": [{"name": f"项目{i}", "description": "项目描述"}], "skills": ""},
+        )
+        assert resp.status_code == 200
+
+    resp = auth_client.post(
+        "/api/resumes",
+        json={"title": "第四份", "projects": [{"name": "超出限制", "description": "项目描述"}], "skills": ""},
+    )
+    assert resp.status_code == 409
+
+
+def test_resume_validation(auth_client):
+    import anyio
+
+    async def seed():
+        await create_user("tester", "hash")
+
+    anyio.run(seed)
+
+    missing_title = auth_client.post("/api/resumes", json={"title": "", "projects": RESUME_PROJECTS, "skills": ""})
+    assert missing_title.status_code == 400
+
+    missing_projects = auth_client.post("/api/resumes", json={"title": "空简历", "projects": [], "skills": "Python"})
+    assert missing_projects.status_code == 400
+
+    missing_project_description = auth_client.post(
+        "/api/resumes",
+        json={"title": "项目不完整", "projects": [{"name": "订单系统", "description": ""}], "skills": ""},
+    )
+    assert missing_project_description.status_code == 400
+
+
+def test_resume_rejects_other_user_operations(auth_client):
+    import anyio
+
+    async def seed():
+        await create_user("tester", "hash")
+        other_id = await create_user("other", "hash")
+        return await db_create_resume(other_id, "其他用户简历", "项目", "技能")
+
+    other_resume = anyio.run(seed)
+
+    update_resp = auth_client.put(
+        f"/api/resumes/{other_resume['id']}",
+        json={"title": "非法修改", "projects": RESUME_PROJECTS, "skills": ""},
+    )
+    assert update_resp.status_code == 404
+
+    delete_resp = auth_client.delete(f"/api/resumes/{other_resume['id']}")
+    assert delete_resp.status_code == 404
+
+
+def test_create_session_with_resume_snapshot(auth_client, monkeypatch):
+    import anyio
+
+    class FakeSessionManager:
+        async def create(
+            self,
+            domain,
+            difficulty,
+            username,
+            user_id,
+            structured_jd="",
+            structured_profile="",
+            resume_title_snapshot="",
+        ):
+            await db_create_session(
+                "sid-resume",
+                user_id,
+                username,
+                domain,
+                difficulty,
+                structured_jd,
+                structured_profile,
+                resume_title_snapshot,
+            )
+            return "sid-resume"
+
+    async def seed():
+        user_id = await create_user("tester", "hash")
+        return await db_create_resume(
+            user_id,
+            "后端项目版",
+            json.dumps(RESUME_PROJECTS, ensure_ascii=False),
+            "Python, Redis",
+        )
+
+    resume = anyio.run(seed)
+    monkeypatch.setattr(server_module, "session_manager", FakeSessionManager())
+
+    resp = auth_client.post(
+        "/api/sessions",
+        json={"domain": "backend", "difficulty": "mid", "resume_id": resume["id"]},
+    )
+
+    assert resp.status_code == 200
+    row = anyio.run(get_session, "sid-resume")
+    assert row["resume_title_snapshot"] == "后端项目版"
+    assert "候选人简历上下文" in row["structured_profile"]
+    assert "订单系统" in row["structured_profile"]
+    assert "项目名称" in row["structured_profile"]
 
 
 def test_list_sessions_returns_current_user_summaries(auth_client):

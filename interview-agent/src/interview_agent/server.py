@@ -16,7 +16,19 @@ from slowapi.util import get_remote_address
 
 from interview_agent.auth import authenticate, get_current_user, register
 from interview_agent.config import auth_settings, llm_settings, server_settings, vectordb_settings
-from interview_agent.db import get_session_for_user, get_session_messages, get_user_by_username, init_db, list_user_sessions
+from interview_agent.db import (
+    count_user_resumes,
+    create_resume,
+    delete_resume_for_user,
+    get_resume_for_user,
+    get_session_for_user,
+    get_session_messages,
+    get_user_by_username,
+    init_db,
+    list_user_resumes,
+    list_user_sessions,
+    update_resume,
+)
 from interview_agent.logging_config import setup_logging
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS
@@ -52,7 +64,7 @@ setup_logging()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=server_settings.get_cors_origins(),
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -142,6 +154,7 @@ class CreateSessionRequest(BaseModel):
     job_description: str = ""
     profile_company: str = ""
     profile_position: str = ""
+    resume_id: int | None = None
 
 
 def _sanitize_path_segment(value: str) -> str:
@@ -160,8 +173,25 @@ class DeleteSessionsRequest(BaseModel):
     session_ids: list[str]
 
 
+class ResumeProjectRequest(BaseModel):
+    name: str
+    description: str
+
+
+class ResumeRequest(BaseModel):
+    title: str
+    projects: list[ResumeProjectRequest]
+    skills: str = ""
+
+
 _MAX_JD_FIELD_LEN = 200
 _MAX_JD_ITEMS = 10
+_MAX_RESUMES_PER_USER = 3
+_MAX_RESUME_TITLE_LEN = 60
+_MAX_RESUME_PROJECTS = 5
+_MAX_RESUME_PROJECT_NAME_LEN = 80
+_MAX_RESUME_PROJECT_DESCRIPTION_LEN = 2000
+_MAX_RESUME_SKILLS_LEN = 2000
 
 
 def _format_jd(jd: object) -> str:
@@ -280,6 +310,7 @@ async def list_profiles(username: str = Depends(get_current_user)) -> dict:
 
 
 _MAX_PROFILE_SIZE = 2000
+_MAX_SESSION_PROFILE_SIZE = 6000
 
 
 def _serialize_session(session: dict) -> dict:
@@ -287,10 +318,144 @@ def _serialize_session(session: dict) -> dict:
         "id": session["id"],
         "domain": session["domain"],
         "difficulty": session["difficulty"],
+        "resume_title_snapshot": session.get("resume_title_snapshot", ""),
         "status": session["status"],
         "created_at": session["created_at"],
         "ended_at": session["ended_at"],
     }
+
+
+def _serialize_resume(resume: dict) -> dict:
+    return {
+        "id": resume["id"],
+        "title": resume["title"],
+        "projects": _parse_resume_projects(resume["projects"]),
+        "skills": resume["skills"],
+        "created_at": resume["created_at"],
+        "updated_at": resume["updated_at"],
+    }
+
+
+def _parse_resume_projects(raw_projects: str) -> list[dict]:
+    stripped = raw_projects.strip()
+    if not stripped:
+        return []
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        return [{"name": "项目经验", "description": stripped}]
+    if not isinstance(parsed, list):
+        return []
+
+    projects = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        description = str(item.get("description", "")).strip()
+        if name or description:
+            projects.append({"name": name or "未命名项目", "description": description})
+    return projects
+
+
+def _clean_resume_projects(projects: list[ResumeProjectRequest]) -> list[dict]:
+    if len(projects) < 1:
+        raise HTTPException(status_code=400, detail="At least one project is required")
+    if len(projects) > _MAX_RESUME_PROJECTS:
+        raise HTTPException(status_code=400, detail="Too many resume projects")
+
+    cleaned = []
+    for project in projects:
+        name = project.name.strip()
+        description = project.description.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Resume project name is required")
+        if not description:
+            raise HTTPException(status_code=400, detail="Resume project description is required")
+        if len(name) > _MAX_RESUME_PROJECT_NAME_LEN:
+            raise HTTPException(status_code=400, detail="Resume project name too long")
+        if len(description) > _MAX_RESUME_PROJECT_DESCRIPTION_LEN:
+            raise HTTPException(status_code=400, detail="Resume project description too long")
+        cleaned.append({"name": name, "description": description})
+    return cleaned
+
+
+def _clean_resume_request(req: ResumeRequest) -> tuple[str, str, str]:
+    title = req.title.strip()
+    projects = _clean_resume_projects(req.projects)
+    skills = req.skills.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="Resume title is required")
+    if len(title) > _MAX_RESUME_TITLE_LEN:
+        raise HTTPException(status_code=400, detail="Resume title too long")
+    if len(skills) > _MAX_RESUME_SKILLS_LEN:
+        raise HTTPException(status_code=400, detail="Resume skills too long")
+    projects_json = json.dumps(projects, ensure_ascii=False)
+    return title, projects_json, skills
+
+
+def _format_resume_context(resume: dict) -> str:
+    parts = [
+        "候选人简历上下文：",
+        f"简历名称：{resume['title']}",
+    ]
+    projects = _parse_resume_projects(resume["projects"])
+    if projects:
+        project_lines = []
+        for idx, project in enumerate(projects, start=1):
+            project_lines.append(
+                f"{idx}. 项目名称：{project['name']}\n"
+                f"   项目描述：{project['description']}"
+            )
+        parts.append("项目经验：\n" + "\n\n".join(project_lines))
+    if resume["skills"]:
+        parts.append(f"技能特长：\n{resume['skills']}")
+    return "\n\n".join(parts)
+
+
+def _combine_profile_context(profile_context: str, resume_context: str) -> str:
+    parts = []
+    if profile_context:
+        parts.append(f"公司岗位画像：\n{profile_context}")
+    if resume_context:
+        parts.append(resume_context)
+    return "\n\n".join(parts)
+
+
+@app.get("/api/resumes")
+async def list_resumes(username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    resumes = await list_user_resumes(user["id"])
+    return {"resumes": [_serialize_resume(resume) for resume in resumes]}
+
+
+@app.post("/api/resumes")
+async def create_resume_api(req: ResumeRequest, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    if await count_user_resumes(user["id"]) >= _MAX_RESUMES_PER_USER:
+        raise HTTPException(status_code=409, detail="最多只能保存 3 份简历")
+    title, projects, skills = _clean_resume_request(req)
+    resume = await create_resume(user["id"], title, projects, skills)
+    return {"resume": _serialize_resume(resume)}
+
+
+@app.put("/api/resumes/{resume_id}")
+async def update_resume_api(resume_id: int, req: ResumeRequest, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    title, projects, skills = _clean_resume_request(req)
+    resume = await update_resume(resume_id, user["id"], title, projects, skills)
+    if resume is None:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return {"resume": _serialize_resume(resume)}
+
+
+@app.delete("/api/resumes/{resume_id}")
+async def delete_resume_api(resume_id: int, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    deleted = await delete_resume_for_user(resume_id, user["id"])
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Resume not found")
+    return {"ok": True}
 
 
 @app.post("/api/sessions")
@@ -303,6 +468,11 @@ async def create_session(
         raise HTTPException(status_code=400, detail="Job description too long")
     if len(req.profile_company) > 128 or len(req.profile_position) > 128:
         raise HTTPException(status_code=400, detail="Profile company/position too long")
+
+    user = await get_user_by_username(username)
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    user_id = user["id"]
 
     structured_jd = ""
     if req.job_description.strip():
@@ -319,13 +489,27 @@ async def create_session(
     if len(structured_profile) > _MAX_PROFILE_SIZE:
         structured_profile = structured_profile[:_MAX_PROFILE_SIZE] + "\n[truncated]"
 
-    user = await get_user_by_username(username)
-    if user is None:
-        raise HTTPException(status_code=401, detail="User not found")
-    user_id = user["id"]
+    resume_title_snapshot = ""
+    resume_context = ""
+    if req.resume_id is not None:
+        resume = await get_resume_for_user(req.resume_id, user_id)
+        if resume is None:
+            raise HTTPException(status_code=404, detail="Resume not found")
+        resume_title_snapshot = resume["title"]
+        resume_context = _format_resume_context(resume)
+
+    structured_profile = _combine_profile_context(structured_profile, resume_context)
+    if len(structured_profile) > _MAX_SESSION_PROFILE_SIZE:
+        structured_profile = structured_profile[:_MAX_SESSION_PROFILE_SIZE] + "\n[truncated]"
 
     session_id = await session_manager.create(
-        req.domain, req.difficulty, username, user_id, structured_jd, structured_profile,
+        req.domain,
+        req.difficulty,
+        username,
+        user_id,
+        structured_jd,
+        structured_profile,
+        resume_title_snapshot,
     )
     logger.info(
         "create_session user=%s session=%s domain=%s difficulty=%s jd_len=%d profile_len=%d",

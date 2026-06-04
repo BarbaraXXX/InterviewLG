@@ -53,6 +53,7 @@ class SessionManager:
         user_id: int,
         structured_jd: str = "",
         structured_profile: str = "",
+        resume_title_snapshot: str = "",
     ) -> str:
         await expire_stale_sessions()
         self._evict_agents()
@@ -68,6 +69,7 @@ class SessionManager:
             difficulty=difficulty,
             structured_jd=structured_jd,
             structured_profile=structured_profile,
+            resume_title_snapshot=resume_title_snapshot,
         )
 
         self._agents[session_id] = InterviewSession(agent, domain, difficulty, username)
