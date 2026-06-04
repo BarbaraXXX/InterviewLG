@@ -156,6 +156,10 @@ class ChatRequest(BaseModel):
     message: str
 
 
+class DeleteSessionsRequest(BaseModel):
+    session_ids: list[str]
+
+
 _MAX_JD_FIELD_LEN = 200
 _MAX_JD_ITEMS = 10
 
@@ -343,6 +347,16 @@ async def list_sessions(username: str = Depends(get_current_user), limit: int = 
     safe_limit = max(1, min(limit, 100))
     sessions = await list_user_sessions(user["id"], safe_limit)
     return {"sessions": sessions}
+
+
+@app.delete("/api/sessions")
+async def delete_sessions(req: DeleteSessionsRequest, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session_ids = [session_id.strip() for session_id in dict.fromkeys(req.session_ids) if session_id.strip()]
+    if len(session_ids) > 100:
+        raise HTTPException(status_code=400, detail="Too many sessions to delete")
+    deleted = await session_manager.delete_many(session_ids, username, user["id"])
+    return {"deleted": deleted}
 
 
 @app.get("/api/sessions/{session_id}")

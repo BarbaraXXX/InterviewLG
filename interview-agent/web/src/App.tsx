@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSession,
   deleteInterviewSession,
+  deleteInterviewSessions,
   endInterviewSession,
   fetchDomains,
   fetchInterviewSessionDetail,
@@ -29,6 +30,8 @@ interface Message {
 }
 
 const AUTH_SESSION_KEY = 'interviewlg_active_session';
+const HISTORY_NOTICE_DISMISSED_KEY = 'interviewlg_history_notice_dismissed';
+const HISTORY_WARNING_THRESHOLD = 45;
 
 function hasActiveBrowserSession(): boolean {
   try {
@@ -51,6 +54,30 @@ function clearActiveBrowserSession(): void {
     sessionStorage.removeItem(AUTH_SESSION_KEY);
   } catch {
     // Ignore storage failures and continue clearing server-side auth state.
+  }
+}
+
+function hasDismissedHistoryNotice(): boolean {
+  try {
+    return sessionStorage.getItem(HISTORY_NOTICE_DISMISSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function markHistoryNoticeDismissed(): void {
+  try {
+    sessionStorage.setItem(HISTORY_NOTICE_DISMISSED_KEY, '1');
+  } catch {
+    // Storage may be unavailable; the in-memory dismissal state still handles the current render.
+  }
+}
+
+function clearHistoryNoticeDismissed(): void {
+  try {
+    sessionStorage.removeItem(HISTORY_NOTICE_DISMISSED_KEY);
+  } catch {
+    // Ignore storage failures.
   }
 }
 
@@ -357,15 +384,21 @@ function DashboardView({
   onStartInterview,
   onProfile,
   onHistory,
+  onManageHistory,
   onInsights,
   onLogout,
+  historyNoticeDismissed,
+  onDismissHistoryNotice,
 }: {
   username: string;
   onStartInterview: () => void;
   onProfile: () => void;
   onHistory: () => void;
+  onManageHistory: () => void;
   onInsights: () => void;
   onLogout: () => void;
+  historyNoticeDismissed: boolean;
+  onDismissHistoryNotice: () => void;
 }) {
   const [sessions, setSessions] = useState<InterviewSessionSummary[]>([]);
   const [summaryUnavailable, setSummaryUnavailable] = useState(false);
@@ -395,6 +428,9 @@ function DashboardView({
   const completedCount = sessions.filter((session) => session.status === 'completed').length;
   const totalMessages = sessions.reduce((sum, session) => sum + session.message_count, 0);
   const latestSession = sessions[0];
+  const shouldShowHistoryNotice = !summaryUnavailable
+    && sessions.length > HISTORY_WARNING_THRESHOLD
+    && !historyNoticeDismissed;
 
   return (
     <div className="setup-view">
@@ -491,12 +527,39 @@ function DashboardView({
                       <li key={item}>{item}</li>
                     ))}
                   </ul>
+                  {note.sections?.map((section) => (
+                    <div className="release-note-section" key={section.title}>
+                      <span>{section.title}</span>
+                      <ul>
+                        {section.items.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
                 </article>
               ))}
             </div>
           </section>
         </main>
       </div>
+
+      {shouldShowHistoryNotice && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="history-notice-modal" role="dialog" aria-modal="true" aria-labelledby="history-notice-title">
+            <p className="eyebrow">Storage Notice</p>
+            <h2 id="history-notice-title">历史面试记录即将达到上限</h2>
+            <p>
+              当前账号已有 {sessions.length} 条历史面试记录。建议及时清理；系统仍允许继续新增记录，
+              直到达到 55 条时会自动删除最早的 5 条，将历史记录保留在最近 50 条以内。
+            </p>
+            <div className="modal-actions">
+              <button className="secondary-button" onClick={onDismissHistoryNotice}>我知道了</button>
+              <button className="inline-start-button" onClick={onManageHistory}>去管理历史记录</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -551,12 +614,14 @@ function PlaceholderView({
 
 function HistoryView({
   username,
+  initialManageMode,
   onHome,
   onStartInterview,
   onResumeInterview,
   onLogout,
 }: {
   username: string;
+  initialManageMode: boolean;
   onHome: () => void;
   onStartInterview: () => void;
   onResumeInterview: (detail: InterviewSessionDetail) => void;
@@ -569,12 +634,14 @@ function HistoryView({
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [manageMode, setManageMode] = useState(initialManageMode);
+  const [checkedIds, setCheckedIds] = useState<string[]>([]);
 
   const loadSessions = useCallback(async () => {
     setLoadingList(true);
     setError('');
     try {
-      const rows = await fetchInterviewSessions(50);
+      const rows = await fetchInterviewSessions(100);
       setSessions(rows);
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
@@ -589,7 +656,7 @@ function HistoryView({
 
   useEffect(() => {
     let ignore = false;
-    fetchInterviewSessions(50)
+    fetchInterviewSessions(100)
       .then((rows) => {
         if (!ignore) {
           setSessions(rows);
@@ -614,6 +681,7 @@ function HistoryView({
   }, [onLogout]);
 
   const selectSession = async (sessionId: string) => {
+    if (manageMode) return;
     setSelectedId(sessionId);
     setLoadingDetail(true);
     setDetail(null);
@@ -655,6 +723,57 @@ function HistoryView({
     }
   };
 
+  const toggleManageMode = () => {
+    setManageMode((current) => {
+      const next = !current;
+      if (current) {
+        setCheckedIds([]);
+      }
+      return next;
+    });
+  };
+
+  const toggleCheckedSession = (sessionId: string) => {
+    setCheckedIds((prev) => (
+      prev.includes(sessionId)
+        ? prev.filter((id) => id !== sessionId)
+        : [...prev, sessionId]
+    ));
+  };
+
+  const toggleAllSessions = () => {
+    setCheckedIds((prev) => (
+      prev.length === sessions.length ? [] : sessions.map((session) => session.id)
+    ));
+  };
+
+  const deleteCheckedSessions = async () => {
+    if (checkedIds.length === 0) return;
+    if (!window.confirm(`确定删除选中的 ${checkedIds.length} 条面试记录吗？删除后无法恢复。`)) {
+      return;
+    }
+    setActionLoading(true);
+    setError('');
+    try {
+      await deleteInterviewSessions(checkedIds);
+      const deletedSet = new Set(checkedIds);
+      setSessions((prev) => prev.filter((session) => !deletedSet.has(session.id)));
+      if (selectedId && deletedSet.has(selectedId)) {
+        setSelectedId('');
+        setDetail(null);
+      }
+      setCheckedIds([]);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setError('批量删除面试记录失败，请稍后重试。');
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const resumeSelectedSession = async () => {
     if (!selectedId || detail?.session.status !== 'paused') return;
     setActionLoading(true);
@@ -686,14 +805,35 @@ function HistoryView({
               <div>
                 <p className="eyebrow">History</p>
                 <h1 className="setup-title">历史面试记录</h1>
-                <p className="setup-subtitle">这里只展示面试概要。点击某次记录后，再加载具体 QA 内容。</p>
+                <p className="setup-subtitle">这里只展示面试概要。点击某次记录后，再加载具体 QA 内容；进入管理模式后可批量删除。</p>
               </div>
-              <button className="secondary-button history-refresh-button" onClick={loadSessions} disabled={loadingList}>
-                {loadingList ? '刷新中' : '刷新'}
-              </button>
+              <div className="history-head-actions">
+                <button className="secondary-button history-refresh-button" onClick={loadSessions} disabled={loadingList}>
+                  {loadingList ? '刷新中' : '刷新'}
+                </button>
+                <button className="secondary-button history-refresh-button" onClick={toggleManageMode}>
+                  {manageMode ? '完成' : '管理'}
+                </button>
+              </div>
             </div>
 
             {error && <div className="login-error" role="alert">{error}</div>}
+
+            {manageMode && sessions.length > 0 && (
+              <div className="history-manage-bar">
+                <button className="secondary-button" onClick={toggleAllSessions}>
+                  {checkedIds.length === sessions.length ? '取消全选' : '全选'}
+                </button>
+                <span>已选择 {checkedIds.length} 条</span>
+                <button
+                  className="danger-button"
+                  onClick={() => void deleteCheckedSessions()}
+                  disabled={checkedIds.length === 0 || actionLoading}
+                >
+                  删除选中
+                </button>
+              </div>
+            )}
 
             <div className="history-records" aria-label="历史面试列表">
               {loadingList && <div className="history-empty">正在加载历史记录...</div>}
@@ -705,16 +845,32 @@ function HistoryView({
                 </div>
               )}
               {!loadingList && sessions.map((session) => (
-                <button
-                  key={session.id}
-                  className={`history-record ${session.id === selectedId ? 'active' : ''}`}
-                  onClick={() => void selectSession(session.id)}
-                  aria-pressed={session.id === selectedId}
-                >
-                  <span>{STATUS_LABELS[session.status] || session.status}</span>
-                  <strong>{DOMAIN_LABELS[session.domain] || session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === session.difficulty)?.label || session.difficulty}</strong>
-                  <small>{formatDateTime(session.created_at)} · {session.message_count} 条消息</small>
-                </button>
+                manageMode ? (
+                  <label
+                    key={session.id}
+                    className={`history-record history-record-select ${checkedIds.includes(session.id) ? 'active' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checkedIds.includes(session.id)}
+                      onChange={() => toggleCheckedSession(session.id)}
+                    />
+                    <span>{STATUS_LABELS[session.status] || session.status}</span>
+                    <strong>{DOMAIN_LABELS[session.domain] || session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === session.difficulty)?.label || session.difficulty}</strong>
+                    <small>{formatDateTime(session.created_at)} · {session.message_count} 条消息</small>
+                  </label>
+                ) : (
+                  <button
+                    key={session.id}
+                    className={`history-record ${session.id === selectedId ? 'active' : ''}`}
+                    onClick={() => void selectSession(session.id)}
+                    aria-pressed={session.id === selectedId}
+                  >
+                    <span>{STATUS_LABELS[session.status] || session.status}</span>
+                    <strong>{DOMAIN_LABELS[session.domain] || session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === session.difficulty)?.label || session.difficulty}</strong>
+                    <small>{formatDateTime(session.created_at)} · {session.message_count} 条消息</small>
+                  </button>
+                )
               ))}
             </div>
           </section>
@@ -1231,6 +1387,8 @@ function App() {
   const [difficulty, setDifficulty] = useState('');
   const [username, setUsername] = useState('');
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [historyNoticeDismissed, setHistoryNoticeDismissed] = useState(() => hasDismissedHistoryNotice());
+  const [historyManageModeDefault, setHistoryManageModeDefault] = useState(false);
 
   useEffect(() => {
     if (!hasActiveBrowserSession()) {
@@ -1242,6 +1400,7 @@ function App() {
       .then((me) => {
         if (me) {
           setUsername(me.username);
+          setHistoryNoticeDismissed(hasDismissedHistoryNotice());
           setView('dashboard');
         } else {
           clearActiveBrowserSession();
@@ -1256,14 +1415,20 @@ function App() {
 
   const handleLogin = (user: string) => {
     markActiveBrowserSession();
+    clearHistoryNoticeDismissed();
     setUsername(user);
+    setHistoryNoticeDismissed(false);
+    setHistoryManageModeDefault(false);
     setView('dashboard');
   };
 
   const handleLogout = async () => {
     clearActiveBrowserSession();
+    clearHistoryNoticeDismissed();
     await logout().catch(() => undefined);
     setUsername('');
+    setHistoryNoticeDismissed(false);
+    setHistoryManageModeDefault(false);
     setView('login');
   };
 
@@ -1322,7 +1487,25 @@ function App() {
   const goHome = () => {
     setSessionId('');
     setChatMessages([]);
+    setHistoryManageModeDefault(false);
     setView('dashboard');
+  };
+
+  const openHistory = () => {
+    setHistoryManageModeDefault(false);
+    setView('history');
+  };
+
+  const openHistoryManagement = () => {
+    markHistoryNoticeDismissed();
+    setHistoryNoticeDismissed(true);
+    setHistoryManageModeDefault(true);
+    setView('history');
+  };
+
+  const dismissHistoryNotice = () => {
+    markHistoryNoticeDismissed();
+    setHistoryNoticeDismissed(true);
   };
 
   return (
@@ -1334,9 +1517,12 @@ function App() {
           username={username}
           onStartInterview={() => setView('setup')}
           onProfile={() => setView('profile')}
-          onHistory={() => setView('history')}
+          onHistory={openHistory}
+          onManageHistory={openHistoryManagement}
           onInsights={() => setView('insights')}
           onLogout={handleLogout}
+          historyNoticeDismissed={historyNoticeDismissed}
+          onDismissHistoryNotice={dismissHistoryNotice}
         />
       )}
       {view === 'setup' && (
@@ -1376,6 +1562,7 @@ function App() {
       {view === 'history' && (
         <HistoryView
           username={username}
+          initialManageMode={historyManageModeDefault}
           onHome={goHome}
           onStartInterview={() => setView('setup')}
           onResumeInterview={handleResume}

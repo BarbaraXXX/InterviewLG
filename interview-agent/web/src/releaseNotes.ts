@@ -2,9 +2,32 @@ export interface ReleaseNote {
   date: string;
   title: string;
   items: string[];
+  sections?: {
+    title: string;
+    items: string[];
+  }[];
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    date: '2026-06-04',
+    title: '历史记录管理',
+    items: [
+      '历史面试记录支持管理模式，可多选后一次性删除。',
+      '历史记录列表改为固定区域内滚动，记录较多时不再撑开页面。',
+      '登录后会在历史记录接近上限时提醒用户及时清理。',
+    ],
+    sections: [
+      {
+        title: '记录删除规则',
+        items: [
+          '历史记录超过 45 条后，每次登录会提示尽快整理。',
+          '达到 55 条时，系统会自动删除最早的 5 条。',
+          '自动清理后保留最近 50 条历史面试记录。',
+        ],
+      },
+    ],
+  },
   {
     date: '2026-06-04',
     title: '历史面试记录回看',

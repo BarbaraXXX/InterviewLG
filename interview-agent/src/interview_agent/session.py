@@ -10,6 +10,7 @@ from interview_agent.db import (
     create_message,
     create_session,
     delete_session_for_user,
+    delete_sessions_for_user,
     expire_stale_sessions,
     get_next_message_seq,
     get_session_for_user,
@@ -160,6 +161,15 @@ class SessionManager:
         deleted = await delete_session_for_user(session_id, user_id)
         logger.info("session delete requested id=%s user=%s deleted=%s", session_id, username, deleted)
         return deleted
+
+    async def delete_many(self, session_ids: list[str], username: str, user_id: int) -> int:
+        deleted_ids = await delete_sessions_for_user(session_ids, user_id)
+        for session_id in deleted_ids:
+            ses = self._agents.get(session_id)
+            if ses is not None and ses.username == username:
+                self._agents.pop(session_id, None)
+        logger.info("session batch delete requested user=%s deleted=%d", username, len(deleted_ids))
+        return len(deleted_ids)
 
 
 session_manager = SessionManager()

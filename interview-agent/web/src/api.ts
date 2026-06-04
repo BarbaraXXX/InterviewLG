@@ -191,6 +191,23 @@ export async function deleteInterviewSession(sessionId: string): Promise<void> {
   }
 }
 
+export async function deleteInterviewSessions(sessionIds: string[]): Promise<number> {
+  const res = await fetch(`${API_BASE}/sessions`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+    body: JSON.stringify({ session_ids: sessionIds }),
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to delete interview sessions');
+  }
+  const data = await res.json();
+  return data.deleted || 0;
+}
+
 export function streamChat(
   sessionId: string,
   message: string,

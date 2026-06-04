@@ -13,7 +13,8 @@ _DB_PATH = _DATA_DIR / "interview.db"
 
 _TTL_SECONDS = 3600
 _MAX_MESSAGES_PER_SESSION = 200
-_MAX_SESSIONS_PER_USER = 50
+_MAX_SESSIONS_AFTER_RETENTION = 50
+_MAX_SESSIONS_BEFORE_RETENTION = 55
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -186,9 +187,19 @@ async def update_session_status(session_id: str, status: str) -> None:
         await db.close()
 
 
-async def trim_user_sessions(user_id: int, keep: int = _MAX_SESSIONS_PER_USER) -> list[str]:
+async def trim_user_sessions(
+    user_id: int,
+    keep: int = _MAX_SESSIONS_AFTER_RETENTION,
+    trigger: int = _MAX_SESSIONS_BEFORE_RETENTION,
+) -> list[str]:
     db = await get_db()
     try:
+        async with db.execute("SELECT COUNT(*) AS cnt FROM sessions WHERE user_id = ?", (user_id,)) as cursor:
+            row = await cursor.fetchone()
+            session_count = row["cnt"] if row else 0
+        if session_count < trigger:
+            return []
+
         async with db.execute(
             "SELECT id FROM sessions WHERE user_id = ? "
             "ORDER BY datetime(created_at) DESC, rowid DESC LIMIT -1 OFFSET ?",
@@ -207,6 +218,7 @@ async def trim_user_sessions(user_id: int, keep: int = _MAX_SESSIONS_PER_USER) -
         return session_ids
     finally:
         await db.close()
+
 
 async def list_user_sessions(user_id: int, limit: int = 20) -> list[dict]:
     db = await get_db()
@@ -266,6 +278,35 @@ async def delete_session_for_user(session_id: str, user_id: int) -> bool:
         if deleted:
             logger.info("session deleted id=%s user_id=%s", session_id, user_id)
         return deleted
+    finally:
+        await db.close()
+
+
+async def delete_sessions_for_user(session_ids: list[str], user_id: int) -> list[str]:
+    unique_ids = list(dict.fromkeys(session_ids))
+    if not unique_ids:
+        return []
+
+    db = await get_db()
+    try:
+        placeholders = ",".join("?" for _ in unique_ids)
+        async with db.execute(
+            f"SELECT id FROM sessions WHERE user_id = ? AND id IN ({placeholders})",
+            (user_id, *unique_ids),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            owned_ids = [row["id"] for row in rows]
+
+        if not owned_ids:
+            return []
+
+        await db.executemany(
+            "DELETE FROM sessions WHERE id = ? AND user_id = ?",
+            [(session_id, user_id) for session_id in owned_ids],
+        )
+        await db.commit()
+        logger.info("sessions deleted count=%d user_id=%s", len(owned_ids), user_id)
+        return owned_ids
     finally:
         await db.close()
 

@@ -149,6 +149,18 @@ async def test_session_manager_trims_user_sessions(mock_agent_build, isolate_env
     assert created[0] not in mgr._agents
 
 
+async def test_session_manager_keeps_sessions_before_retention_trigger(mock_agent_build, isolate_env):
+    await init_db()
+    user_id = await _make_user("alice")
+    mgr = SessionManager()
+    for _ in range(54):
+        await mgr.create("backend", "mid", "alice", user_id)
+
+    rows = await list_user_sessions(user_id, 100)
+
+    assert len(rows) == 54
+
+
 async def test_session_manager_max_agents(mock_agent_build, isolate_env):
     from interview_agent import session as session_module
 

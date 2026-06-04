@@ -240,6 +240,32 @@ def test_delete_session_removes_history(auth_client):
     assert anyio.run(get_session, "sid-1") is None
 
 
+def test_delete_sessions_batch_removes_current_user_history_only(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      other_id = await create_user("other", "hash")
+      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await db_create_session("sid-2", user_id, "tester", "frontend", "junior")
+      await db_create_session("sid-other", other_id, "other", "backend", "mid")
+      await create_message("sid-1", "user", "delete me", 0)
+
+    anyio.run(seed)
+
+    resp = auth_client.request(
+        "DELETE",
+        "/api/sessions",
+        json={"session_ids": ["sid-1", "sid-2", "sid-other"]},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 2}
+    assert anyio.run(get_session, "sid-1") is None
+    assert anyio.run(get_session, "sid-2") is None
+    assert anyio.run(get_session, "sid-other") is not None
+
+
 def test_sanitize_path_segment_normal():
     assert server_module._sanitize_path_segment("hello-world") == "hello-world"
 
