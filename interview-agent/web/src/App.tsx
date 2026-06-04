@@ -356,6 +356,35 @@ function DashboardView({
   onInsights: () => void;
   onLogout: () => void;
 }) {
+  const [sessions, setSessions] = useState<InterviewSessionSummary[]>([]);
+  const [summaryUnavailable, setSummaryUnavailable] = useState(false);
+
+  useEffect(() => {
+    let ignore = false;
+    fetchInterviewSessions(100)
+      .then((rows) => {
+        if (!ignore) {
+          setSessions(rows);
+          setSummaryUnavailable(false);
+        }
+      })
+      .catch((err) => {
+        if (ignore) return;
+        if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+          onLogout();
+        } else {
+          setSummaryUnavailable(true);
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [onLogout]);
+
+  const completedCount = sessions.filter((session) => session.status === 'completed').length;
+  const totalMessages = sessions.reduce((sum, session) => sum + session.message_count, 0);
+  const latestSession = sessions[0];
+
   return (
     <div className="setup-view">
       <div className="console-shell dashboard-shell">
@@ -407,19 +436,31 @@ function DashboardView({
 
           <aside className="dashboard-status" aria-label="当前状态">
             <div>
-              <span>Account</span>
-              <strong>{username}</strong>
-              <small>当前浏览器会话已登录</small>
+              <span>Training</span>
+              <strong>{summaryUnavailable ? '暂不可用' : `${sessions.length} 次面试`}</strong>
+              <small>
+                {summaryUnavailable
+                  ? '历史概览加载失败，不影响开始新的面试。'
+                  : `已完成 ${completedCount} 次，累计 ${totalMessages} 条对话消息。`}
+              </small>
             </div>
             <div>
-              <span>Core Flow</span>
-              <strong>可用</strong>
-              <small>模拟面试配置与对话流程保持原逻辑</small>
+              <span>Latest</span>
+              <strong>
+                {latestSession
+                  ? `${DOMAIN_LABELS[latestSession.domain] || latestSession.domain} / ${DIFFICULTY_OPTIONS.find((d) => d.value === latestSession.difficulty)?.label || latestSession.difficulty}`
+                  : '暂无记录'}
+              </strong>
+              <small>
+                {latestSession
+                  ? `${STATUS_LABELS[latestSession.status] || latestSession.status} · ${formatDateTime(latestSession.created_at)}`
+                  : '完成一次模拟面试后，这里会显示最近练习。'}
+              </small>
             </div>
             <div>
-              <span>Reserved</span>
-              <strong>3 个入口</strong>
-              <small>个人信息、历史记录和 AI 总结等待后续接入</small>
+              <span>Available</span>
+              <strong>面试 + 回看 + 题库参考</strong>
+              <small>当前可用模拟技术面试、历史 QA 回看和真实面试题参考。</small>
             </div>
           </aside>
 
