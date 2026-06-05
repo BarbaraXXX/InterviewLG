@@ -203,6 +203,38 @@ function toQaPairs(messages: InterviewMessage[]) {
   return pairs;
 }
 
+type QaPair = ReturnType<typeof toQaPairs>[number];
+
+type HistoryTimelineItem =
+  | { type: 'qa'; item: QaPair; qaIndex: number; sortTime: number; order: number }
+  | { type: 'coding'; item: CodingTask; taskIndex: number; sortTime: number; order: number };
+
+function timeValue(value: string | null): number {
+  if (!value) return 0;
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const time = new Date(normalized).getTime();
+  return Number.isNaN(time) ? 0 : time;
+}
+
+function buildHistoryTimeline(qaPairs: QaPair[], codingTasks: CodingTask[]): HistoryTimelineItem[] {
+  return [
+    ...qaPairs.map((pair, index) => ({
+      type: 'qa' as const,
+      item: pair,
+      qaIndex: index,
+      sortTime: timeValue(pair.question.created_at),
+      order: index * 2,
+    })),
+    ...codingTasks.map((task, index) => ({
+      type: 'coding' as const,
+      item: task,
+      taskIndex: index,
+      sortTime: timeValue(task.created_at),
+      order: index * 2 + 1,
+    })),
+  ].sort((a, b) => a.sortTime - b.sortTime || a.order - b.order);
+}
+
 function toChatMessages(messages: InterviewMessage[]): Message[] {
   return messages.map((message) => ({
     role: message.role,
@@ -1242,6 +1274,7 @@ function HistoryView({
 
   const activeSession = sessions.find((session) => session.id === selectedId);
   const qaPairs = detail ? toQaPairs(detail.messages) : [];
+  const timelineItems = detail ? buildHistoryTimeline(qaPairs, detail.coding_tasks) : [];
 
   return (
     <div className="setup-view">
@@ -1362,17 +1395,15 @@ function HistoryView({
                   </div>
                 </div>
 
-                {detail.coding_tasks.length > 0 && (
-                  <section className="history-coding-section" aria-label="本场代码题">
-                    <div className="section-heading">
-                      <p className="eyebrow">Coding Tasks</p>
-                      <h2>本场代码题</h2>
-                    </div>
-                    <div className="history-coding-list">
-                      {detail.coding_tasks.map((task, index) => (
-                        <article className="history-coding-card" key={task.id}>
+                <div className="qa-list">
+                  {timelineItems.length === 0 && <div className="history-empty">这次面试还没有可回看的内容。</div>}
+                  {timelineItems.map((timelineItem) => {
+                    if (timelineItem.type === 'coding') {
+                      const task = timelineItem.item;
+                      return (
+                        <article className="history-coding-card" key={`coding-${task.id}`}>
                           <div className="qa-card-head">
-                            <span>Task {index + 1}</span>
+                            <span>Task {timelineItem.taskIndex + 1}</span>
                             <small>
                               {task.status === 'submitted'
                                 ? `已提交 · ${formatDateTime(task.submitted_at)}`
@@ -1394,29 +1425,27 @@ function HistoryView({
                             <div className="history-empty">这道题还没有提交代码。</div>
                           )}
                         </article>
-                      ))}
-                    </div>
-                  </section>
-                )}
+                      );
+                    }
 
-                <div className="qa-list">
-                  {qaPairs.length === 0 && <div className="history-empty">这次面试还没有可回看的 QA。</div>}
-                  {qaPairs.map((pair, index) => (
-                    <article className="qa-card" key={`${pair.question.seq}-${index}`}>
-                      <div className="qa-card-head">
-                        <span>Q{index + 1}</span>
-                        <small>{formatDateTime(pair.question.created_at)}</small>
-                      </div>
-                      <div className="qa-message user">
-                        <strong>我的回答</strong>
-                        <MarkdownMessage content={pair.question.content} />
-                      </div>
-                      <div className="qa-message ai">
-                        <strong>AI 面试官</strong>
-                        <MarkdownMessage content={pair.answer?.content || '这轮还没有 AI 回复。'} />
-                      </div>
-                    </article>
-                  ))}
+                    const pair = timelineItem.item;
+                    return (
+                      <article className="qa-card" key={`qa-${pair.question.seq}-${timelineItem.qaIndex}`}>
+                        <div className="qa-card-head">
+                          <span>Q{timelineItem.qaIndex + 1}</span>
+                          <small>{formatDateTime(pair.question.created_at)}</small>
+                        </div>
+                        <div className="qa-message user">
+                          <strong>我的回答</strong>
+                          <MarkdownMessage content={pair.question.content} />
+                        </div>
+                        <div className="qa-message ai">
+                          <strong>AI 面试官</strong>
+                          <MarkdownMessage content={pair.answer?.content || '这轮还没有 AI 回复。'} />
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               </>
             )}

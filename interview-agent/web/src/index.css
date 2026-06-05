@@ -1912,21 +1912,6 @@ body {
   gap: var(--space-4);
 }
 
-.history-coding-section {
-  margin-top: var(--space-4);
-  padding: var(--space-4);
-  background: var(--color-surface-raised);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-md);
-}
-
-.history-coding-list {
-  margin-top: var(--space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-}
-
 .history-coding-card {
   padding: var(--space-4);
   background: var(--color-surface);
