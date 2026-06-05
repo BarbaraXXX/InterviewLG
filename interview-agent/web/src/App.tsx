@@ -30,6 +30,7 @@ import {
 import { RELEASE_NOTES } from './releaseNotes';
 
 type View = 'loading' | 'login' | 'dashboard' | 'setup' | 'chat' | 'profile' | 'history' | 'insights';
+type ThemeMode = 'light' | 'dark';
 
 interface Message {
   role: 'user' | 'ai';
@@ -39,7 +40,32 @@ interface Message {
 
 const AUTH_SESSION_KEY = 'interviewlg_active_session';
 const HISTORY_NOTICE_DISMISSED_KEY = 'interviewlg_history_notice_dismissed';
+const THEME_STORAGE_KEY = 'interviewlg_theme';
 const HISTORY_WARNING_THRESHOLD = 45;
+
+function getInitialTheme(): ThemeMode {
+  try {
+    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === 'light' || savedTheme === 'dark') return savedTheme;
+  } catch {
+    // Ignore storage failures and fall back to system preference.
+  }
+
+  if (window.matchMedia?.('(prefers-color-scheme: light)').matches) {
+    return 'light';
+  }
+  return 'dark';
+}
+
+function persistTheme(theme: ThemeMode): void {
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {
+    // Theme still applies for the current page if storage is unavailable.
+  }
+}
 
 function hasActiveBrowserSession(): boolean {
   try {
@@ -210,14 +236,42 @@ function LogoMark() {
   );
 }
 
+function ThemeToggle({ theme, onToggle }: { theme: ThemeMode; onToggle: () => void }) {
+  const isLight = theme === 'light';
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={onToggle}
+      aria-label={isLight ? '切换到黑夜模式' : '切换到白天模式'}
+      title={isLight ? '切换到黑夜模式' : '切换到白天模式'}
+    >
+      {isLight ? (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M21 14.2A7.4 7.4 0 0 1 9.8 3a8.2 8.2 0 1 0 11.2 11.2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      ) : (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2" />
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function ConsoleTopbar({
   title,
   username,
+  theme,
+  onToggleTheme,
   onLogout,
   onHome,
 }: {
   title: string;
   username: string;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
   onLogout: () => void;
   onHome?: () => void;
 }) {
@@ -229,6 +283,7 @@ function ConsoleTopbar({
       </div>
       <div className="user-badge">
         <span className="system-pill">已登录</span>
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <span className="user-badge-name">{username}</span>
         {onHome && <button className="ghost-link" onClick={onHome}>工作台</button>}
         <button className="logout-link" onClick={onLogout}>退出</button>
@@ -411,6 +466,8 @@ function LoginView({ onLogin }: { onLogin: (username: string) => void }) {
 
 function DashboardView({
   username,
+  theme,
+  onToggleTheme,
   onStartInterview,
   onProfile,
   onHistory,
@@ -421,6 +478,8 @@ function DashboardView({
   onDismissHistoryNotice,
 }: {
   username: string;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
   onStartInterview: () => void;
   onProfile: () => void;
   onHistory: () => void;
@@ -465,7 +524,7 @@ function DashboardView({
   return (
     <div className="setup-view">
       <div className="console-shell dashboard-shell">
-        <ConsoleTopbar title="Interview Agent 工作台" username={username} onLogout={onLogout} />
+        <ConsoleTopbar title="Interview Agent 工作台" username={username} theme={theme} onToggleTheme={onToggleTheme} onLogout={onLogout} />
 
         <main className="dashboard-grid">
           <section className="dashboard-hero" aria-label="工作台概览">
@@ -596,6 +655,8 @@ function DashboardView({
 
 function PlaceholderView({
   username,
+  theme,
+  onToggleTheme,
   title,
   eyebrow,
   description,
@@ -605,6 +666,8 @@ function PlaceholderView({
   onLogout,
 }: {
   username: string;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
   title: string;
   eyebrow: string;
   description: string;
@@ -616,7 +679,7 @@ function PlaceholderView({
   return (
     <div className="setup-view">
       <div className="console-shell placeholder-shell">
-        <ConsoleTopbar title={title} username={username} onLogout={onLogout} onHome={onHome} />
+        <ConsoleTopbar title={title} username={username} theme={theme} onToggleTheme={onToggleTheme} onLogout={onLogout} onHome={onHome} />
         <main className="placeholder-layout">
           <section className="placeholder-main">
             <p className="eyebrow">{eyebrow}</p>
@@ -644,11 +707,15 @@ function PlaceholderView({
 
 function ResumeManagerView({
   username,
+  theme,
+  onToggleTheme,
   onHome,
   onStartInterview,
   onLogout,
 }: {
   username: string;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
   onHome: () => void;
   onStartInterview: () => void;
   onLogout: () => void;
@@ -809,7 +876,7 @@ function ResumeManagerView({
   return (
     <div className="setup-view">
       <div className="console-shell profile-shell">
-        <ConsoleTopbar title="完善个人信息" username={username} onLogout={onLogout} onHome={onHome} />
+        <ConsoleTopbar title="完善个人信息" username={username} theme={theme} onToggleTheme={onToggleTheme} onLogout={onLogout} onHome={onHome} />
         <main className="resume-layout">
           <section className="resume-main">
             <div className="section-heading">
@@ -973,6 +1040,8 @@ function ResumeManagerView({
 
 function HistoryView({
   username,
+  theme,
+  onToggleTheme,
   initialManageMode,
   onHome,
   onStartInterview,
@@ -980,6 +1049,8 @@ function HistoryView({
   onLogout,
 }: {
   username: string;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
   initialManageMode: boolean;
   onHome: () => void;
   onStartInterview: () => void;
@@ -1157,7 +1228,7 @@ function HistoryView({
   return (
     <div className="setup-view">
       <div className="console-shell history-shell">
-        <ConsoleTopbar title="历史面试记录" username={username} onLogout={onLogout} onHome={onHome} />
+        <ConsoleTopbar title="历史面试记录" username={username} theme={theme} onToggleTheme={onToggleTheme} onLogout={onLogout} onHome={onHome} />
         <main className="history-layout">
           <section className="history-list-panel">
             <div className="history-panel-head">
@@ -1307,7 +1378,7 @@ function HistoryView({
   );
 }
 
-function SetupView({ onStart, username, onLogout, onBack, onProfile }: {
+function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, onProfile }: {
   onStart: (
     domain: string,
     difficulty: string,
@@ -1317,6 +1388,8 @@ function SetupView({ onStart, username, onLogout, onBack, onProfile }: {
     resumeId: number | null,
   ) => void;
   username: string;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
   onLogout: () => void;
   onBack: () => void;
   onProfile: () => void;
@@ -1466,7 +1539,7 @@ function SetupView({ onStart, username, onLogout, onBack, onProfile }: {
   return (
     <div className="setup-view">
       <div className="console-shell">
-        <ConsoleTopbar title="模拟技术面试" username={username} onLogout={onLogout} onHome={onBack} />
+        <ConsoleTopbar title="模拟技术面试" username={username} theme={theme} onToggleTheme={onToggleTheme} onLogout={onLogout} onHome={onBack} />
 
         <div className="console-grid">
           <aside className="workflow-rail" aria-label="配置步骤">
@@ -1748,6 +1821,8 @@ function ChatView({
   domain,
   difficulty,
   initialMessages,
+  theme,
+  onToggleTheme,
   onPause,
   onEnd,
 }: {
@@ -1755,6 +1830,8 @@ function ChatView({
   domain: string;
   difficulty: string;
   initialMessages: Message[];
+  theme: ThemeMode;
+  onToggleTheme: () => void;
   onPause: () => Promise<void>;
   onEnd: () => Promise<void>;
 }) {
@@ -1839,6 +1916,7 @@ function ChatView({
           <span className="chat-header-diff">{diffLabel}</span>
         </div>
         <div className="chat-header-actions">
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <button className="pause-button" onClick={handlePause}>
             中断面试
           </button>
@@ -1925,6 +2003,7 @@ function LoadingView() {
 
 function App() {
   const [view, setView] = useState<View>(() => (hasActiveBrowserSession() ? 'loading' : 'login'));
+  const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [sessionId, setSessionId] = useState('');
   const [domain, setDomain] = useState('');
   const [difficulty, setDifficulty] = useState('');
@@ -1932,6 +2011,14 @@ function App() {
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [historyNoticeDismissed, setHistoryNoticeDismissed] = useState(() => hasDismissedHistoryNotice());
   const [historyManageModeDefault, setHistoryManageModeDefault] = useState(false);
+
+  useEffect(() => {
+    persistTheme(theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+  };
 
   useEffect(() => {
     if (!hasActiveBrowserSession()) {
@@ -2065,6 +2152,8 @@ function App() {
       {view === 'dashboard' && (
         <DashboardView
           username={username}
+          theme={theme}
+          onToggleTheme={toggleTheme}
           onStartInterview={() => setView('setup')}
           onProfile={() => setView('profile')}
           onHistory={openHistory}
@@ -2079,6 +2168,8 @@ function App() {
         <SetupView
           onStart={handleStart}
           username={username}
+          theme={theme}
+          onToggleTheme={toggleTheme}
           onLogout={handleLogout}
           onBack={goHome}
           onProfile={() => setView('profile')}
@@ -2090,6 +2181,8 @@ function App() {
           domain={domain}
           difficulty={difficulty}
           initialMessages={chatMessages}
+          theme={theme}
+          onToggleTheme={toggleTheme}
           onPause={handlePause}
           onEnd={handleEnd}
         />
@@ -2097,6 +2190,8 @@ function App() {
       {view === 'profile' && (
         <ResumeManagerView
           username={username}
+          theme={theme}
+          onToggleTheme={toggleTheme}
           onHome={goHome}
           onStartInterview={() => setView('setup')}
           onLogout={handleLogout}
@@ -2105,6 +2200,8 @@ function App() {
       {view === 'history' && (
         <HistoryView
           username={username}
+          theme={theme}
+          onToggleTheme={toggleTheme}
           initialManageMode={historyManageModeDefault}
           onHome={goHome}
           onStartInterview={() => setView('setup')}
@@ -2115,6 +2212,8 @@ function App() {
       {view === 'insights' && (
         <PlaceholderView
           username={username}
+          theme={theme}
+          onToggleTheme={toggleTheme}
           title="AI 表现总结"
           eyebrow="Insights"
           description="这个页面先作为历史表现分析入口预留。后续接入后，将基于多轮面试记录总结知识覆盖、表达质量和提升建议。"
