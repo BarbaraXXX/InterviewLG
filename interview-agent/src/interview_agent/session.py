@@ -58,8 +58,8 @@ class SessionManager:
         await expire_stale_sessions()
         self._evict_agents()
 
-        agent = await build_interview_agent(domain, difficulty, structured_jd, structured_profile)
         session_id = uuid.uuid4().hex
+        agent = await build_interview_agent(domain, difficulty, structured_jd, structured_profile, session_id=session_id)
 
         await create_session(
             session_id=session_id,
@@ -108,6 +108,7 @@ class SessionManager:
             row["difficulty"],
             row["structured_jd"],
             row["structured_profile"],
+            session_id=session_id,
         )
         ses = InterviewSession(agent, row["domain"], row["difficulty"], username)
         self._agents[session_id] = ses
@@ -148,6 +149,7 @@ class SessionManager:
             row["difficulty"],
             row["structured_jd"],
             row["structured_profile"],
+            session_id=session_id,
         )
         await update_session_status(session_id, "active")
         ses = InterviewSession(agent, row["domain"], row["difficulty"], username)

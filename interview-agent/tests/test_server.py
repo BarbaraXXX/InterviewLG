@@ -8,6 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from interview_agent import server as server_module
 from interview_agent.auth import get_current_user
 from interview_agent.db import (
+    create_coding_task,
     create_message,
     create_resume as db_create_resume,
     create_session as db_create_session,
@@ -375,6 +376,73 @@ def test_get_session_detail_returns_messages_for_owner(auth_client):
     assert body["session"]["id"] == "sid-1"
     assert [m["role"] for m in body["messages"]] == ["user", "ai"]
     assert body["messages"][0]["content"] == "我了解缓存"
+    assert body["coding_tasks"] == []
+
+
+def test_coding_task_active_and_submit(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-code", user_id, "tester", "backend", "mid")
+      return await create_coding_task(
+          "task-1",
+          "sid-code",
+          "两数之和",
+          "给定数组和目标值，返回两个数的下标。",
+          "python",
+          "class Solution:\n    pass",
+          json.dumps(["只需要返回任意一种答案"], ensure_ascii=False),
+          json.dumps([{"input": "nums=[2,7], target=9", "output": "[0,1]"}], ensure_ascii=False),
+      )
+
+    anyio.run(seed)
+
+    active = auth_client.get("/api/sessions/sid-code/coding-task/active")
+    assert active.status_code == 200
+    task = active.json()["task"]
+    assert task["title"] == "两数之和"
+    assert task["constraints"] == ["只需要返回任意一种答案"]
+    assert task["examples"][0]["output"] == "[0,1]"
+
+    submitted = auth_client.post(
+        "/api/coding-tasks/task-1/submit",
+        json={"language": "python", "code": "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]"},
+    )
+    assert submitted.status_code == 200
+    body = submitted.json()
+    assert body["task"]["status"] == "submitted"
+    assert "用户提交了一道手撕代码题答案" in body["context_message"]
+    assert "twoSum" in body["context_message"]
+
+    repeat = auth_client.post(
+        "/api/coding-tasks/task-1/submit",
+        json={"language": "python", "code": "print('again')"},
+    )
+    assert repeat.status_code == 409
+
+    active_after_submit = auth_client.get("/api/sessions/sid-code/coding-task/active")
+    assert active_after_submit.status_code == 200
+    assert active_after_submit.json()["task"] is None
+
+
+def test_coding_task_rejects_other_user(auth_client):
+    import anyio
+
+    async def seed():
+      await create_user("tester", "hash")
+      other_id = await create_user("other", "hash")
+      await db_create_session("sid-other", other_id, "other", "backend", "mid")
+      await create_coding_task("task-other", "sid-other", "反转链表", "反转链表。", "java", "", "[]", "[]")
+
+    anyio.run(seed)
+
+    resp = auth_client.post(
+        "/api/coding-tasks/task-other/submit",
+        json={"language": "java", "code": "class Solution {}"},
+    )
+
+    assert resp.status_code == 404
 
 
 def test_get_session_detail_rejects_other_user_session(auth_client):
@@ -638,3 +706,32 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
     assert "真实面试题参考" in agent.last_messages[-1].content
     assert fake_manager.appended[0] == ("user", "继续问 Redis")
     assert fake_manager.appended[-1] == ("ai", "好的")
+
+
+def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):
+    agent = FakeStreamAgent()
+    fake_manager = FakeSessionManager(agent)
+
+    async def fake_get_user(username):
+        return {"id": 1, "username": username}
+
+    async def fake_search(query, domain):
+        assert "完整代码上下文" in query
+        return []
+
+    monkeypatch.setattr(server_module, "session_manager", fake_manager)
+    monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
+    monkeypatch.setattr(server_module, "search_interview_cards", fake_search)
+
+    with auth_client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"session_id": "sid", "message": "已提交代码题：两数之和", "context_message": "完整代码上下文"},
+    ) as resp:
+        body = "".join(resp.iter_text())
+
+    assert resp.status_code == 200
+    assert "好的" in body
+    assert isinstance(agent.last_messages[-1], HumanMessage)
+    assert agent.last_messages[-1].content == "完整代码上下文"
+    assert fake_manager.appended[0] == ("user", "已提交代码题：两数之和")

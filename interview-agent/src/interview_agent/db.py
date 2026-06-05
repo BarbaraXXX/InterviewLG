@@ -86,10 +86,30 @@ async def init_db() -> None:
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS coding_tasks (
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT NOT NULL,
+                language TEXT NOT NULL,
+                starter_code TEXT NOT NULL DEFAULT '',
+                constraints_json TEXT NOT NULL DEFAULT '[]',
+                examples_json TEXT NOT NULL DEFAULT '[]',
+                submitted_language TEXT,
+                submitted_code TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                submitted_at TEXT,
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(id, user_id);
             CREATE INDEX IF NOT EXISTS idx_resumes_user ON resumes(user_id, updated_at);
+            CREATE INDEX IF NOT EXISTS idx_coding_tasks_session ON coding_tasks(session_id, created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_coding_tasks_one_active
+                ON coding_tasks(session_id) WHERE status = 'active';
         """)
         await _ensure_column(db, "sessions", "resume_title_snapshot", "TEXT NOT NULL DEFAULT ''")
         await db.commit()
@@ -499,6 +519,118 @@ async def upsert_user_interview_config(
 
 
 # ── messages ───────────────────────────────────────────────────────
+
+
+async def create_coding_task(
+    task_id: str,
+    session_id: str,
+    title: str,
+    description: str,
+    language: str,
+    starter_code: str,
+    constraints_json: str,
+    examples_json: str,
+) -> dict:
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO coding_tasks "
+            "(id, session_id, title, description, language, starter_code, constraints_json, examples_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (task_id, session_id, title, description, language, starter_code, constraints_json, examples_json),
+        )
+        await db.commit()
+        logger.info("coding task created id=%s session=%s", task_id, session_id)
+    finally:
+        await db.close()
+
+    task = await get_coding_task(task_id)
+    if task is None:
+        raise RuntimeError("Coding task was not persisted")
+    return task
+
+
+async def get_coding_task(task_id: str) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
+            "submitted_language, submitted_code, status, created_at, submitted_at "
+            "FROM coding_tasks WHERE id = ?",
+            (task_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def get_active_coding_task(session_id: str) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
+            "submitted_language, submitted_code, status, created_at, submitted_at "
+            "FROM coding_tasks WHERE session_id = ? AND status = 'active' "
+            "ORDER BY datetime(created_at) DESC LIMIT 1",
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def list_session_coding_tasks(session_id: str) -> list[dict]:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
+            "submitted_language, submitted_code, status, created_at, submitted_at "
+            "FROM coding_tasks WHERE session_id = ? ORDER BY datetime(created_at) ASC, rowid ASC",
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def get_coding_task_for_user(task_id: str, user_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT t.id, t.session_id, t.title, t.description, t.language, t.starter_code, "
+            "t.constraints_json, t.examples_json, t.submitted_language, t.submitted_code, "
+            "t.status, t.created_at, t.submitted_at "
+            "FROM coding_tasks t "
+            "JOIN sessions s ON s.id = t.session_id "
+            "WHERE t.id = ? AND s.user_id = ?",
+            (task_id, user_id),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def submit_coding_task_for_user(task_id: str, user_id: int, language: str, code: str) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "UPDATE coding_tasks SET submitted_language = ?, submitted_code = ?, status = 'submitted', "
+            "submitted_at = datetime('now') "
+            "WHERE id = ? AND status = 'active' AND session_id IN (SELECT id FROM sessions WHERE user_id = ?)",
+            (language, code, task_id, user_id),
+        )
+        await db.commit()
+        if cursor.rowcount <= 0:
+            return None
+        logger.info("coding task submitted id=%s user_id=%s", task_id, user_id)
+    finally:
+        await db.close()
+
+    return await get_coding_task_for_user(task_id, user_id)
 
 
 async def create_message(session_id: str, role: str, content: str, seq: int) -> None:

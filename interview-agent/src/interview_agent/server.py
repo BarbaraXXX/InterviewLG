@@ -8,7 +8,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -20,14 +20,18 @@ from interview_agent.db import (
     count_user_resumes,
     create_resume,
     delete_resume_for_user,
+    get_active_coding_task,
+    get_coding_task_for_user,
     get_resume_for_user,
     get_session_for_user,
     get_session_messages,
     get_user_interview_config,
     get_user_by_username,
     init_db,
+    list_session_coding_tasks,
     list_user_resumes,
     list_user_sessions,
+    submit_coding_task_for_user,
     update_resume,
     upsert_user_interview_config,
 )
@@ -169,6 +173,7 @@ def _sanitize_path_segment(value: str) -> str:
 class ChatRequest(BaseModel):
     session_id: str
     message: str
+    context_message: str = ""
 
 
 class DeleteSessionsRequest(BaseModel):
@@ -186,6 +191,11 @@ class ResumeRequest(BaseModel):
     skills: str = ""
 
 
+class CodingTaskSubmitRequest(BaseModel):
+    language: str
+    code: str
+
+
 _MAX_JD_FIELD_LEN = 200
 _MAX_JD_ITEMS = 10
 _MAX_RESUMES_PER_USER = 3
@@ -194,6 +204,9 @@ _MAX_RESUME_PROJECTS = 5
 _MAX_RESUME_PROJECT_NAME_LEN = 80
 _MAX_RESUME_PROJECT_DESCRIPTION_LEN = 2000
 _MAX_RESUME_SKILLS_LEN = 2000
+_SUPPORTED_CODING_LANGUAGES = {"python", "javascript", "typescript", "java", "cpp", "go"}
+_MAX_CODE_SUBMISSION_LEN = 20000
+_MAX_CONTEXT_MESSAGE_LEN = 40000
 
 
 def _format_jd(jd: object) -> str:
@@ -350,6 +363,74 @@ def _serialize_interview_config(config: dict | None) -> dict | None:
         "resume_id": config["resume_id"],
         "updated_at": config["updated_at"],
     }
+
+
+def _parse_json_list(value: str) -> list:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _serialize_coding_task(task: dict | None) -> dict | None:
+    if task is None:
+        return None
+    return {
+        "id": task["id"],
+        "session_id": task["session_id"],
+        "title": task["title"],
+        "description": task["description"],
+        "language": task["language"],
+        "starter_code": task["starter_code"],
+        "constraints": _parse_json_list(task["constraints_json"]),
+        "examples": _parse_json_list(task["examples_json"]),
+        "submitted_language": task["submitted_language"],
+        "submitted_code": task["submitted_code"],
+        "status": task["status"],
+        "created_at": task["created_at"],
+        "submitted_at": task["submitted_at"],
+    }
+
+
+def _clean_coding_language(language: str) -> str:
+    normalized = language.strip().lower()
+    aliases = {"js": "javascript", "ts": "typescript", "c++": "cpp", "golang": "go"}
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in _SUPPORTED_CODING_LANGUAGES:
+        raise HTTPException(status_code=400, detail="Unsupported coding language")
+    return normalized
+
+
+def _build_code_submission_context(task: dict, language: str, code: str) -> str:
+    constraints = _parse_json_list(task["constraints_json"])
+    examples = _parse_json_list(task["examples_json"])
+    parts = [
+        "用户提交了一道手撕代码题答案。",
+        f"题目：{task['title']}",
+        f"语言：{language}",
+        f"题目描述：\n{task['description']}",
+    ]
+    if constraints:
+        parts.append("约束：\n" + "\n".join(f"- {item}" for item in constraints))
+    if examples:
+        example_lines = []
+        for idx, example in enumerate(examples, start=1):
+            if not isinstance(example, dict):
+                continue
+            line = f"{idx}. 输入：{example.get('input', '')}\n   输出：{example.get('output', '')}"
+            explanation = example.get("explanation", "")
+            if explanation:
+                line += f"\n   说明：{explanation}"
+            example_lines.append(line)
+        if example_lines:
+            parts.append("示例：\n" + "\n".join(example_lines))
+    parts.append(f"用户代码：\n```{language}\n{code}\n```")
+    parts.append(
+        "请作为技术面试官评价这份代码的思路、复杂度、边界条件和代码质量，"
+        "然后根据表现继续追问或进入下一环节。"
+    )
+    return "\n\n".join(parts)
 
 
 def _parse_resume_projects(raw_projects: str) -> list[dict]:
@@ -582,9 +663,56 @@ async def get_session_detail(session_id: str, username: str = Depends(get_curren
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     messages = await get_session_messages(session_id)
+    coding_tasks = await list_session_coding_tasks(session_id)
     return {
         "session": _serialize_session(session),
         "messages": messages,
+        "coding_tasks": [_serialize_coding_task(task) for task in coding_tasks],
+    }
+
+
+@app.get("/api/sessions/{session_id}/coding-task/active")
+async def get_active_session_coding_task(session_id: str, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    task = await get_active_coding_task(session_id)
+    return {"task": _serialize_coding_task(task)}
+
+
+@app.get("/api/sessions/{session_id}/coding-tasks")
+async def list_session_coding_task_api(session_id: str, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    tasks = await list_session_coding_tasks(session_id)
+    return {"tasks": [_serialize_coding_task(task) for task in tasks]}
+
+
+@app.post("/api/coding-tasks/{task_id}/submit")
+async def submit_coding_task(task_id: str, req: CodingTaskSubmitRequest, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    existing = await get_coding_task_for_user(task_id, user["id"])
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Coding task not found")
+    if existing["status"] != "active":
+        raise HTTPException(status_code=409, detail="Coding task has already been submitted")
+
+    language = _clean_coding_language(req.language)
+    code = req.code.strip()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code is required")
+    if len(code) > _MAX_CODE_SUBMISSION_LEN:
+        raise HTTPException(status_code=400, detail="Code submission too long")
+
+    task = await submit_coding_task_for_user(task_id, user["id"], language, code)
+    if task is None:
+        raise HTTPException(status_code=409, detail="Coding task has already been submitted")
+    return {
+        "task": _serialize_coding_task(task),
+        "context_message": _build_code_submission_context(task, language, code),
     }
 
 
@@ -635,6 +763,8 @@ async def resume_session(session_id: str, username: str = Depends(get_current_us
 async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user)):
     if len(req.message) > _MAX_MESSAGE_LEN:
         raise HTTPException(status_code=400, detail="Message too long")
+    if len(req.context_message) > _MAX_CONTEXT_MESSAGE_LEN:
+        raise HTTPException(status_code=400, detail="Context message too long")
 
     user = await _get_current_user_row(username)
 
@@ -644,14 +774,19 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
     logger.info("chat_stream start user=%s session=%s msg_len=%d", username, req.session_id, len(req.message))
 
-    await session_manager.append_message(req.session_id, "user", req.message)
+    display_message = req.message.strip()
+    context_message = req.context_message.strip()
+    await session_manager.append_message(req.session_id, "user", display_message)
     messages = await session_manager.load_messages(req.session_id)
-    rag_query = build_rag_query(ses.domain, ses.difficulty, req.message, messages)
+    run_messages = messages
+    if context_message and run_messages:
+        run_messages = [*run_messages[:-1], HumanMessage(content=context_message)]
+
+    rag_query = build_rag_query(ses.domain, ses.difficulty, context_message or display_message, run_messages)
     rag_cards = await search_interview_cards(rag_query, ses.domain)
     rag_context = format_rag_context(rag_cards)
-    run_messages = messages
     if rag_context:
-        run_messages = [*messages, SystemMessage(content=rag_context)]
+        run_messages = [*run_messages, SystemMessage(content=rag_context)]
         logger.info("rag context injected session=%s cards=%d chars=%d", req.session_id, len(rag_cards), len(rag_context))
 
     async def event_generator():

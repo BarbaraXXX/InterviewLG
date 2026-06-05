@@ -21,6 +21,29 @@ export interface InterviewMessage {
 export interface InterviewSessionDetail {
   session: Omit<InterviewSessionSummary, 'message_count'>;
   messages: InterviewMessage[];
+  coding_tasks: CodingTask[];
+}
+
+export interface CodingTaskExample {
+  input: string;
+  output: string;
+  explanation?: string;
+}
+
+export interface CodingTask {
+  id: string;
+  session_id: string;
+  title: string;
+  description: string;
+  language: string;
+  starter_code: string;
+  constraints: string[];
+  examples: CodingTaskExample[];
+  submitted_language: string | null;
+  submitted_code: string | null;
+  status: 'active' | 'submitted';
+  created_at: string;
+  submitted_at: string | null;
 }
 
 export interface ResumeProject {
@@ -245,6 +268,38 @@ export async function fetchInterviewSessionDetail(sessionId: string): Promise<In
   return res.json();
 }
 
+export async function fetchActiveCodingTask(sessionId: string): Promise<CodingTask | null> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/coding-task/active`, {
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to fetch coding task');
+  }
+  const data = await res.json();
+  return data.task || null;
+}
+
+export async function submitCodingTask(taskId: string, language: string, code: string): Promise<{ task: CodingTask; contextMessage: string }> {
+  const res = await fetch(`${API_BASE}/coding-tasks/${taskId}/submit`, {
+    method: 'POST',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+    body: JSON.stringify({ language, code }),
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to submit coding task');
+  }
+  return { task: data.task, contextMessage: data.context_message };
+}
+
 export async function endInterviewSession(sessionId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/end`, {
     method: 'POST',
@@ -324,13 +379,14 @@ export function streamChat(
   message: string,
   onToken: (text: string) => void,
   onDone: () => void,
+  contextMessage: string = '',
 ): AbortController {
   const controller = new AbortController();
   fetch(`${API_BASE}/chat/stream`, {
     method: 'POST',
     headers: authHeaders(),
     credentials: 'same-origin',
-    body: JSON.stringify({ session_id: sessionId, message }),
+    body: JSON.stringify({ session_id: sessionId, message, context_message: contextMessage }),
     signal: controller.signal,
   }).then(async (res) => {
     if (res.status === 401) {

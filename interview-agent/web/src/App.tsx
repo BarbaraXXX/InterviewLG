@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { lazy, Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import {
   createSession,
   createResume,
@@ -6,6 +6,7 @@ import {
   deleteInterviewSessions,
   deleteResume,
   endInterviewSession,
+  fetchActiveCodingTask,
   fetchDomains,
   fetchInterviewSessionDetail,
   fetchInterviewSessions,
@@ -19,7 +20,9 @@ import {
   register,
   resumeInterviewSession,
   streamChat,
+  submitCodingTask,
   updateResume,
+  type CodingTask,
   type InterviewMessage,
   type InterviewSessionDetail,
   type InterviewSessionSummary,
@@ -27,8 +30,11 @@ import {
   type Resume,
   type ResumeProject,
 } from './api';
+import { CODING_LANGUAGE_LABELS } from './codingLanguages';
 import { RELEASE_NOTES } from './releaseNotes';
 import { APP_VERSION } from './version';
+
+const CodingWorkspace = lazy(() => import('./CodingWorkspace'));
 
 type View = 'loading' | 'login' | 'dashboard' | 'setup' | 'chat' | 'profile' | 'history' | 'insights';
 type ThemeMode = 'light' | 'dark';
@@ -1348,6 +1354,32 @@ function HistoryView({
                   </div>
                 </div>
 
+                {detail.coding_tasks.length > 0 && (
+                  <section className="history-coding-section" aria-label="本场代码题">
+                    <div className="section-heading">
+                      <p className="eyebrow">Coding Tasks</p>
+                      <h2>本场代码题</h2>
+                    </div>
+                    <div className="history-coding-list">
+                      {detail.coding_tasks.map((task, index) => (
+                        <article className="history-coding-card" key={task.id}>
+                          <div className="qa-card-head">
+                            <span>Task {index + 1}</span>
+                            <small>{task.status === 'submitted' ? `已提交 · ${formatDateTime(task.submitted_at)}` : '未提交'}</small>
+                          </div>
+                          <h3>{task.title}</h3>
+                          <p>{task.description}</p>
+                          {task.submitted_code ? (
+                            <pre><code>{task.submitted_code}</code></pre>
+                          ) : (
+                            <div className="history-empty">这道题还没有提交代码。</div>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
                 <div className="qa-list">
                   {qaPairs.length === 0 && <div className="history-empty">这次面试还没有可回看的 QA。</div>}
                   {qaPairs.map((pair, index) => (
@@ -1843,6 +1875,7 @@ function ChatView({
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
+  const [codingTask, setCodingTask] = useState<CodingTask | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -1854,15 +1887,41 @@ function ChatView({
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
-  const handleSend = () => {
-    const text = input.trim();
+  const refreshCodingTask = useCallback(async () => {
+    try {
+      const task = await fetchActiveCodingTask(sessionId);
+      if (task) {
+        setCodingTask(task);
+      }
+    } catch {
+      // Keep chat usable even if the coding workspace cannot refresh.
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    let ignore = false;
+    fetchActiveCodingTask(sessionId)
+      .then((task) => {
+        if (!ignore && task) {
+          setCodingTask(task);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      ignore = true;
+    };
+  }, [sessionId]);
+
+  const startAgentStream = useCallback((displayMessage: string, contextMessage: string = '') => {
+    const text = displayMessage.trim();
     if (!text || isStreaming) return;
 
     setInput('');
-    setMessages((prev) => [...prev, { role: 'user', content: text }]);
-
-    const aiMsgIndex = messages.length + 1;
-    setMessages((prev) => [...prev, { role: 'ai', content: '', streaming: true }]);
+    let aiMsgIndex = 0;
+    setMessages((prev) => {
+      aiMsgIndex = prev.length + 1;
+      return [...prev, { role: 'user', content: text }, { role: 'ai', content: '', streaming: true }];
+    });
     setIsStreaming(true);
 
     const controller = streamChat(
@@ -1882,9 +1941,22 @@ function ChatView({
           ),
         );
         setIsStreaming(false);
+        void refreshCodingTask();
       },
+      contextMessage,
     );
     abortRef.current = controller;
+  }, [isStreaming, refreshCodingTask, sessionId]);
+
+  const handleSend = () => {
+    startAgentStream(input);
+  };
+
+  const handleCodingSubmit = async (task: CodingTask, language: string, code: string) => {
+    const result = await submitCodingTask(task.id, language, code);
+    setCodingTask(result.task);
+    const languageLabel = CODING_LANGUAGE_LABELS[language] || language;
+    startAgentStream(`已提交代码题：${task.title}（${languageLabel}）`, result.contextMessage);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -1911,7 +1983,7 @@ function ChatView({
   const diffLabel = DIFFICULTY_OPTIONS.find((d) => d.value === difficulty)?.label || difficulty;
 
   return (
-    <div className="chat-view">
+    <div className={`chat-view ${codingTask ? 'with-coding' : ''}`}>
       <header className="chat-header">
         <div className="chat-header-info">
           <div className="chat-header-dot" />
@@ -1930,56 +2002,70 @@ function ChatView({
         </div>
       </header>
 
-      <div className="chat-messages">
-        {messages.length === 0 && (
-          <div className="chat-empty">
-            <p>面试即将开始，请先自我介绍吧</p>
-          </div>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`message-row ${msg.role === 'user' ? 'user' : 'ai'}`}>
-            {msg.role === 'ai' && (
-              <div className="ai-avatar">
-                <svg width="20" height="20" viewBox="0 0 36 36" fill="none">
-                  <rect width="36" height="36" rx="8" fill="var(--color-accent)" />
-                  <path d="M10 18L16 12L22 18L16 24Z" fill="white" opacity="0.9" />
-                  <path d="M16 18L22 12L28 18L22 24Z" fill="white" opacity="0.6" />
-                </svg>
+      <div className="chat-body">
+        <section className="chat-panel" aria-label="面试对话">
+          <div className="chat-messages">
+            {messages.length === 0 && (
+              <div className="chat-empty">
+                <p>面试即将开始，请先自我介绍吧</p>
               </div>
             )}
-            <div className={`message-bubble ${msg.role}`}>
-              {msg.content}
-              {msg.streaming && <span className="cursor-blink" />}
-            </div>
+            {messages.map((msg, i) => (
+              <div key={i} className={`message-row ${msg.role === 'user' ? 'user' : 'ai'}`}>
+                {msg.role === 'ai' && (
+                  <div className="ai-avatar">
+                    <svg width="20" height="20" viewBox="0 0 36 36" fill="none">
+                      <rect width="36" height="36" rx="8" fill="var(--color-accent)" />
+                      <path d="M10 18L16 12L22 18L16 24Z" fill="white" opacity="0.9" />
+                      <path d="M16 18L22 12L28 18L22 24Z" fill="white" opacity="0.6" />
+                    </svg>
+                  </div>
+                )}
+                <div className={`message-bubble ${msg.role}`}>
+                  {msg.content}
+                  {msg.streaming && <span className="cursor-blink" />}
+                </div>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
           </div>
-        ))}
-        <div ref={messagesEndRef} />
-      </div>
 
-      <div className="chat-input-bar">
-        <textarea
-          aria-label="面试回答"
-          className="chat-input"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onCompositionStart={() => setIsComposing(true)}
-          onCompositionEnd={() => setIsComposing(false)}
-          onKeyDown={handleKeyDown}
-          placeholder="输入你的回答..."
-          rows={1}
-          disabled={isStreaming}
-        />
-        <button
-          aria-label="发送回答"
-          className="send-button"
-          onClick={handleSend}
-          disabled={!input.trim() || isStreaming}
-        >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13" />
-            <polygon points="22 2 15 22 11 13 2 9 22 2" />
-          </svg>
-        </button>
+          <div className="chat-input-bar">
+            <textarea
+              aria-label="面试回答"
+              className="chat-input"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onCompositionStart={() => setIsComposing(true)}
+              onCompositionEnd={() => setIsComposing(false)}
+              onKeyDown={handleKeyDown}
+              placeholder="输入你的回答..."
+              rows={1}
+              disabled={isStreaming}
+            />
+            <button
+              aria-label="发送回答"
+              className="send-button"
+              onClick={handleSend}
+              disabled={!input.trim() || isStreaming}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+            </button>
+          </div>
+        </section>
+        {codingTask && (
+          <Suspense fallback={<aside className="coding-workspace coding-loading">正在加载手撕平台...</aside>}>
+            <CodingWorkspace
+              key={`${codingTask.id}-${codingTask.status}`}
+              task={codingTask}
+              theme={theme}
+              onSubmit={handleCodingSubmit}
+            />
+          </Suspense>
+        )}
       </div>
     </div>
   );
