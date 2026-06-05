@@ -2000,7 +2000,7 @@ body {
   border: 1px solid var(--color-border-subtle);
 }
 
-.qa-message strong {
+.qa-message > strong {
   display: block;
   margin-bottom: var(--space-2);
   color: var(--color-text);
@@ -2603,7 +2603,6 @@ body {
   line-height: 1.65;
   border-radius: var(--radius-lg);
   word-break: break-word;
-  white-space: pre-wrap;
 }
 
 .message-bubble.user {
@@ -2617,6 +2616,91 @@ body {
   color: var(--color-text);
   border: 1px solid var(--color-border-subtle);
   border-bottom-left-radius: var(--space-1);
+}
+
+.markdown-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.markdown-content > :first-child {
+  margin-top: 0;
+}
+
+.markdown-content > :last-child {
+  margin-bottom: 0;
+}
+
+.markdown-content p,
+.markdown-content ul,
+.markdown-content ol,
+.markdown-content pre,
+.markdown-content blockquote {
+  margin: 0;
+}
+
+.markdown-content strong {
+  color: inherit;
+  font-weight: 800;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 1.25rem;
+}
+
+.markdown-content li + li {
+  margin-top: var(--space-1);
+}
+
+.markdown-content code {
+  padding: 0.1rem 0.32rem;
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.82em;
+}
+
+.message-bubble.user .markdown-content code {
+  color: var(--color-user-text);
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.markdown-content pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: var(--space-3);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.markdown-content pre code {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  white-space: pre;
+}
+
+.markdown-content blockquote {
+  padding-left: var(--space-3);
+  color: var(--color-text-secondary);
+  border-left: 3px solid var(--color-accent-border);
+}
+
+.markdown-content a {
+  color: var(--color-accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.markdown-content a:hover {
+  text-decoration: underline;
 }
 
 .cursor-blink {

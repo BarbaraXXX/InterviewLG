@@ -7,6 +7,7 @@ import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { CODING_LANGUAGE_LABELS, CODING_LANGUAGE_OPTIONS } from './codingLanguages';
+import MarkdownMessage from './MarkdownMessage';
 import { saveCodingTaskDraft, type CodingTask } from './api';
 
 type ThemeMode = 'light' | 'dark';
@@ -97,13 +98,13 @@ export default function CodingWorkspace({
       <div className="coding-task-body">
         <section className="coding-problem">
           <h3>题目描述</h3>
-          <p>{task.description}</p>
+          <MarkdownMessage content={task.description} />
           {task.constraints.length > 0 && (
             <div>
               <h3>约束</h3>
               <ul>
                 {task.constraints.map((item) => (
-                  <li key={item}>{item}</li>
+                  <li key={item}><MarkdownMessage content={item} /></li>
                 ))}
               </ul>
             </div>
@@ -115,9 +116,9 @@ export default function CodingWorkspace({
                 {task.examples.map((example, index) => (
                   <div className="coding-example" key={`${example.input}-${index}`}>
                     <strong>示例 {index + 1}</strong>
-                    {example.input && <p>输入：{example.input}</p>}
-                    {example.output && <p>输出：{example.output}</p>}
-                    {example.explanation && <p>说明：{example.explanation}</p>}
+                    {example.input && <MarkdownMessage content={`输入：${example.input}`} />}
+                    {example.output && <MarkdownMessage content={`输出：${example.output}`} />}
+                    {example.explanation && <MarkdownMessage content={`说明：${example.explanation}`} />}
                   </div>
                 ))}
               </div>

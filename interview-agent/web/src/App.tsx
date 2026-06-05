@@ -31,6 +31,7 @@ import {
   type ResumeProject,
 } from './api';
 import { CODING_LANGUAGE_LABELS } from './codingLanguages';
+import MarkdownMessage from './MarkdownMessage';
 import { RELEASE_NOTES } from './releaseNotes';
 import { APP_VERSION } from './version';
 
@@ -1381,7 +1382,7 @@ function HistoryView({
                             </small>
                           </div>
                           <h3>{task.title}</h3>
-                          <p>{task.description}</p>
+                          <MarkdownMessage content={task.description} />
                           {task.submitted_code ? (
                             <pre><code>{task.submitted_code}</code></pre>
                           ) : task.draft_code ? (
@@ -1408,11 +1409,11 @@ function HistoryView({
                       </div>
                       <div className="qa-message user">
                         <strong>我的回答</strong>
-                        <p>{pair.question.content}</p>
+                        <MarkdownMessage content={pair.question.content} />
                       </div>
                       <div className="qa-message ai">
                         <strong>AI 面试官</strong>
-                        <p>{pair.answer?.content || '这轮还没有 AI 回复。'}</p>
+                        <MarkdownMessage content={pair.answer?.content || '这轮还没有 AI 回复。'} />
                       </div>
                     </article>
                   ))}
@@ -2040,7 +2041,7 @@ function ChatView({
                   </div>
                 )}
                 <div className={`message-bubble ${msg.role}`}>
-                  {msg.content}
+                  <MarkdownMessage content={msg.content} />
                   {msg.streaming && <span className="cursor-blink" />}
                 </div>
               </div>
