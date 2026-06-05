@@ -245,6 +245,93 @@ def test_create_session_with_resume_snapshot(auth_client, monkeypatch):
     assert "项目名称" in row["structured_profile"]
 
 
+def test_last_interview_config_empty(auth_client):
+    import anyio
+
+    async def seed():
+        await create_user("tester", "hash")
+
+    anyio.run(seed)
+
+    resp = auth_client.get("/api/interview-config/last")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"config": None}
+
+
+def test_create_session_saves_last_interview_config(auth_client, monkeypatch):
+    import anyio
+
+    class FakeSessionManager:
+        def __init__(self):
+            self.count = 0
+
+        async def create(
+            self,
+            domain,
+            difficulty,
+            username,
+            user_id,
+            structured_jd="",
+            structured_profile="",
+            resume_title_snapshot="",
+        ):
+            self.count += 1
+            session_id = f"sid-config-{self.count}"
+            await db_create_session(
+                session_id,
+                user_id,
+                username,
+                domain,
+                difficulty,
+                structured_jd,
+                structured_profile,
+                resume_title_snapshot,
+            )
+            return session_id
+
+    async def seed():
+        user_id = await create_user("tester", "hash")
+        return await db_create_resume(
+            user_id,
+            "后端项目版",
+            json.dumps(RESUME_PROJECTS, ensure_ascii=False),
+            "Python, Redis",
+        )
+
+    resume = anyio.run(seed)
+    monkeypatch.setattr(server_module, "session_manager", FakeSessionManager())
+
+    first = auth_client.post(
+        "/api/sessions",
+        json={
+            "domain": "backend",
+            "difficulty": "mid",
+            "job_description": "后端开发 JD",
+            "profile_company": "Acme",
+            "profile_position": "Backend Engineer",
+            "resume_id": resume["id"],
+        },
+    )
+    assert first.status_code == 200
+
+    second = auth_client.post(
+        "/api/sessions",
+        json={"domain": "frontend", "difficulty": "junior"},
+    )
+    assert second.status_code == 200
+
+    resp = auth_client.get("/api/interview-config/last")
+
+    assert resp.status_code == 200
+    config = resp.json()["config"]
+    assert config["domain"] == "frontend"
+    assert config["difficulty"] == "junior"
+    assert config["job_description"] == ""
+    assert config["profile_company"] == ""
+    assert config["resume_id"] is None
+
+
 def test_list_sessions_returns_current_user_summaries(auth_client):
     import anyio
 

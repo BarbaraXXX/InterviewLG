@@ -37,6 +37,16 @@ export interface Resume {
   updated_at: string;
 }
 
+export interface LastInterviewConfig {
+  domain: string;
+  difficulty: string;
+  job_description: string;
+  profile_company: string;
+  profile_position: string;
+  resume_id: number | null;
+  updated_at: string;
+}
+
 function authHeaders(): Record<string, string> {
   return { 'Content-Type': 'application/json' };
 }
@@ -113,6 +123,21 @@ export async function fetchResumes(): Promise<Resume[]> {
   }
   const data = await res.json();
   return data.resumes || [];
+}
+
+export async function fetchLastInterviewConfig(): Promise<LastInterviewConfig | null> {
+  const res = await fetch(`${API_BASE}/interview-config/last`, {
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to fetch last interview config');
+  }
+  const data = await res.json();
+  return data.config || null;
 }
 
 export async function createResume(title: string, projects: ResumeProject[], skills: string): Promise<Resume> {

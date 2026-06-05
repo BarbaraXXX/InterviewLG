@@ -23,11 +23,13 @@ from interview_agent.db import (
     get_resume_for_user,
     get_session_for_user,
     get_session_messages,
+    get_user_interview_config,
     get_user_by_username,
     init_db,
     list_user_resumes,
     list_user_sessions,
     update_resume,
+    upsert_user_interview_config,
 )
 from interview_agent.logging_config import setup_logging
 from interview_agent.migrate import migrate_users_if_needed
@@ -336,6 +338,20 @@ def _serialize_resume(resume: dict) -> dict:
     }
 
 
+def _serialize_interview_config(config: dict | None) -> dict | None:
+    if config is None:
+        return None
+    return {
+        "domain": config["domain"],
+        "difficulty": config["difficulty"],
+        "job_description": config["job_description"],
+        "profile_company": config["profile_company"],
+        "profile_position": config["profile_position"],
+        "resume_id": config["resume_id"],
+        "updated_at": config["updated_at"],
+    }
+
+
 def _parse_resume_projects(raw_projects: str) -> list[dict]:
     stripped = raw_projects.strip()
     if not stripped:
@@ -458,6 +474,13 @@ async def delete_resume_api(resume_id: int, username: str = Depends(get_current_
     return {"ok": True}
 
 
+@app.get("/api/interview-config/last")
+async def get_last_interview_config(username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    config = await get_user_interview_config(user["id"])
+    return {"config": _serialize_interview_config(config)}
+
+
 @app.post("/api/sessions")
 async def create_session(
     req: CreateSessionRequest, username: str = Depends(get_current_user)
@@ -510,6 +533,15 @@ async def create_session(
         structured_jd,
         structured_profile,
         resume_title_snapshot,
+    )
+    await upsert_user_interview_config(
+        user_id=user_id,
+        domain=req.domain.strip(),
+        difficulty=req.difficulty.strip(),
+        job_description=req.job_description.strip(),
+        profile_company=req.profile_company.strip(),
+        profile_position=req.profile_position.strip(),
+        resume_id=req.resume_id,
     )
     logger.info(
         "create_session user=%s session=%s domain=%s difficulty=%s jd_len=%d profile_len=%d",

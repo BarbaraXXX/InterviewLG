@@ -1974,6 +1974,28 @@ body {
   font-size: 0.85rem;
 }
 
+.config-status-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.config-status-actions .secondary-button {
+  width: 100%;
+  white-space: nowrap;
+}
+
+.config-notice {
+  margin-top: calc(var(--space-3) * -1);
+  padding: var(--space-3) var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
 .config-section,
 .context-panel {
   padding: var(--space-5);

@@ -9,6 +9,7 @@ import {
   fetchDomains,
   fetchInterviewSessionDetail,
   fetchInterviewSessions,
+  fetchLastInterviewConfig,
   fetchProfiles,
   fetchResumes,
   getMe,
@@ -22,6 +23,7 @@ import {
   type InterviewMessage,
   type InterviewSessionDetail,
   type InterviewSessionSummary,
+  type LastInterviewConfig,
   type Resume,
   type ResumeProject,
 } from './api';
@@ -1332,6 +1334,8 @@ function SetupView({ onStart, username, onLogout, onBack, onProfile }: {
   const [customCompany, setCustomCompany] = useState('');
   const [customPosition, setCustomPosition] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loadingLastConfig, setLoadingLastConfig] = useState(false);
+  const [configNotice, setConfigNotice] = useState('');
 
   useEffect(() => {
     fetchDomains().then(setDomains).catch(() => {});
@@ -1360,6 +1364,89 @@ function SetupView({ onStart, username, onLogout, onBack, onProfile }: {
   const activeDomainLabel = activeDomain ? (DOMAIN_LABELS[activeDomain] || activeDomain) : '待选择';
   const activeDifficulty = DIFFICULTY_OPTIONS.find((opt) => opt.value === difficulty) || DIFFICULTY_OPTIONS[1];
   const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
+
+  const applyInterviewConfig = (
+    config: LastInterviewConfig,
+    availableDomains: string[],
+    availableResumes: Resume[],
+    availableProfiles: {key: string; company: string; position: string; source_count: number}[],
+  ) => {
+    const presetDomain = availableDomains.includes(config.domain);
+    if (presetDomain) {
+      setSelectedDomain(config.domain);
+      setCustomDomain('');
+    } else {
+      setSelectedDomain('');
+      setCustomDomain(config.domain);
+    }
+
+    setDifficulty(config.difficulty || 'mid');
+    setJobDescription(config.job_description || '');
+
+    if (config.resume_id && availableResumes.some((resume) => resume.id === config.resume_id)) {
+      setSelectedResumeId(config.resume_id);
+    } else {
+      setSelectedResumeId(null);
+      if (config.resume_id) {
+        setConfigNotice('已加载上次配置，但上次使用的简历已不存在，已切换为不使用简历。');
+      }
+    }
+
+    const profileCompany = config.profile_company || '';
+    const profilePosition = config.profile_position || '';
+    if (profileCompany && profilePosition) {
+      const profileIndex = availableProfiles.findIndex(
+        (profile) => profile.company === profileCompany && profile.position === profilePosition,
+      );
+      if (profileIndex >= 0) {
+        setSelectedProfileIdx(profileIndex);
+        setCustomCompany('');
+        setCustomPosition('');
+      } else {
+        setSelectedProfileIdx(-2);
+        setCustomCompany(profileCompany);
+        setCustomPosition(profilePosition);
+      }
+    } else {
+      setSelectedProfileIdx(-1);
+      setCustomCompany('');
+      setCustomPosition('');
+    }
+
+    if (!config.resume_id || availableResumes.some((resume) => resume.id === config.resume_id)) {
+      setConfigNotice('已加载上次面试配置。');
+    }
+  };
+
+  const loadLastConfig = async () => {
+    setLoadingLastConfig(true);
+    setConfigNotice('');
+    try {
+      const [config, latestDomains, latestResumes, latestProfiles] = await Promise.all([
+        fetchLastInterviewConfig(),
+        fetchDomains(),
+        fetchResumes(),
+        fetchProfiles(),
+      ]);
+      if (!config) {
+        setConfigNotice('还没有可加载的历史配置。完成一次面试配置后，这里会自动保存最近一次配置。');
+        return;
+      }
+      setDomains(latestDomains);
+      setResumes(latestResumes);
+      setProfiles(latestProfiles);
+      setResumeLoadError(false);
+      applyInterviewConfig(config, latestDomains, latestResumes, latestProfiles);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setConfigNotice('加载上次配置失败，请稍后重试。');
+      }
+    } finally {
+      setLoadingLastConfig(false);
+    }
+  };
 
   const handleStart = () => {
     if (!activeDomain || !difficulty) return;
@@ -1433,11 +1520,22 @@ function SetupView({ onStart, username, onLogout, onBack, onProfile }: {
                 <h1 className="setup-title">定制你的技术面试场景</h1>
                 <p className="setup-subtitle">保留必要输入，减少多余选择。方向决定问题范围，难度决定追问深度，JD 会让问题更贴近真实招聘要求。</p>
               </div>
-              <div className="config-status">
-                <span>{activeDomain ? 'Ready' : 'Waiting'}</span>
-                <strong>{activeDomain ? '配置可启动' : '请选择技术方向'}</strong>
+              <div className="config-status config-status-actions">
+                <div>
+                  <span>{activeDomain ? 'Ready' : 'Waiting'}</span>
+                  <strong>{activeDomain ? '配置可启动' : '请选择技术方向'}</strong>
+                </div>
+                <button
+                  className="secondary-button"
+                  onClick={() => void loadLastConfig()}
+                  disabled={loadingLastConfig}
+                >
+                  {loadingLastConfig ? '加载中' : '加载上次配置'}
+                </button>
               </div>
             </section>
+
+            {configNotice && <div className="config-notice">{configNotice}</div>}
 
             <section className="config-section">
               <div className="section-heading">

@@ -64,6 +64,18 @@ async def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS user_interview_configs (
+                user_id INTEGER PRIMARY KEY,
+                domain TEXT NOT NULL,
+                difficulty TEXT NOT NULL,
+                job_description TEXT NOT NULL DEFAULT '',
+                profile_company TEXT NOT NULL DEFAULT '',
+                profile_position TEXT NOT NULL DEFAULT '',
+                resume_id INTEGER,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
@@ -434,6 +446,54 @@ async def delete_resume_for_user(resume_id: int, user_id: int) -> bool:
         if deleted:
             logger.info("resume deleted id=%s user_id=%s", resume_id, user_id)
         return deleted
+    finally:
+        await db.close()
+
+
+# ── interview configs ──────────────────────────────────────────────
+
+
+async def get_user_interview_config(user_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT user_id, domain, difficulty, job_description, profile_company, profile_position, resume_id, updated_at "
+            "FROM user_interview_configs WHERE user_id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def upsert_user_interview_config(
+    user_id: int,
+    domain: str,
+    difficulty: str,
+    job_description: str,
+    profile_company: str,
+    profile_position: str,
+    resume_id: int | None,
+) -> None:
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO user_interview_configs "
+            "(user_id, domain, difficulty, job_description, profile_company, profile_position, resume_id, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now')) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "domain = excluded.domain, "
+            "difficulty = excluded.difficulty, "
+            "job_description = excluded.job_description, "
+            "profile_company = excluded.profile_company, "
+            "profile_position = excluded.profile_position, "
+            "resume_id = excluded.resume_id, "
+            "updated_at = datetime('now')",
+            (user_id, domain, difficulty, job_description, profile_company, profile_position, resume_id),
+        )
+        await db.commit()
+        logger.info("interview config saved user_id=%s", user_id)
     finally:
         await db.close()
 
