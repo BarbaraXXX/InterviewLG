@@ -95,6 +95,8 @@ async def init_db() -> None:
                 starter_code TEXT NOT NULL DEFAULT '',
                 constraints_json TEXT NOT NULL DEFAULT '[]',
                 examples_json TEXT NOT NULL DEFAULT '[]',
+                draft_language TEXT,
+                draft_code TEXT,
                 submitted_language TEXT,
                 submitted_code TEXT,
                 status TEXT NOT NULL DEFAULT 'active',
@@ -112,6 +114,8 @@ async def init_db() -> None:
                 ON coding_tasks(session_id) WHERE status = 'active';
         """)
         await _ensure_column(db, "sessions", "resume_title_snapshot", "TEXT NOT NULL DEFAULT ''")
+        await _ensure_column(db, "coding_tasks", "draft_language", "TEXT")
+        await _ensure_column(db, "coding_tasks", "draft_code", "TEXT")
         await db.commit()
         logger.info("database initialized at %s", _DB_PATH)
     finally:
@@ -555,7 +559,7 @@ async def get_coding_task(task_id: str) -> dict | None:
     try:
         async with db.execute(
             "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
-            "submitted_language, submitted_code, status, created_at, submitted_at "
+            "draft_language, draft_code, submitted_language, submitted_code, status, created_at, submitted_at "
             "FROM coding_tasks WHERE id = ?",
             (task_id,),
         ) as cursor:
@@ -570,7 +574,7 @@ async def get_active_coding_task(session_id: str) -> dict | None:
     try:
         async with db.execute(
             "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
-            "submitted_language, submitted_code, status, created_at, submitted_at "
+            "draft_language, draft_code, submitted_language, submitted_code, status, created_at, submitted_at "
             "FROM coding_tasks WHERE session_id = ? AND status = 'active' "
             "ORDER BY datetime(created_at) DESC LIMIT 1",
             (session_id,),
@@ -586,7 +590,7 @@ async def list_session_coding_tasks(session_id: str) -> list[dict]:
     try:
         async with db.execute(
             "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
-            "submitted_language, submitted_code, status, created_at, submitted_at "
+            "draft_language, draft_code, submitted_language, submitted_code, status, created_at, submitted_at "
             "FROM coding_tasks WHERE session_id = ? ORDER BY datetime(created_at) ASC, rowid ASC",
             (session_id,),
         ) as cursor:
@@ -601,7 +605,7 @@ async def get_coding_task_for_user(task_id: str, user_id: int) -> dict | None:
     try:
         async with db.execute(
             "SELECT t.id, t.session_id, t.title, t.description, t.language, t.starter_code, "
-            "t.constraints_json, t.examples_json, t.submitted_language, t.submitted_code, "
+            "t.constraints_json, t.examples_json, t.draft_language, t.draft_code, t.submitted_language, t.submitted_code, "
             "t.status, t.created_at, t.submitted_at "
             "FROM coding_tasks t "
             "JOIN sessions s ON s.id = t.session_id "
@@ -627,6 +631,24 @@ async def submit_coding_task_for_user(task_id: str, user_id: int, language: str,
         if cursor.rowcount <= 0:
             return None
         logger.info("coding task submitted id=%s user_id=%s", task_id, user_id)
+    finally:
+        await db.close()
+
+    return await get_coding_task_for_user(task_id, user_id)
+
+
+async def save_coding_task_draft_for_user(task_id: str, user_id: int, language: str, code: str) -> dict | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "UPDATE coding_tasks SET draft_language = ?, draft_code = ? "
+            "WHERE id = ? AND status = 'active' AND session_id IN (SELECT id FROM sessions WHERE user_id = ?)",
+            (language, code, task_id, user_id),
+        )
+        await db.commit()
+        if cursor.rowcount <= 0:
+            return None
+        logger.info("coding task draft saved id=%s user_id=%s", task_id, user_id)
     finally:
         await db.close()
 

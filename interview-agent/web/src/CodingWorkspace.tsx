@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { cpp } from '@codemirror/lang-cpp';
 import { java } from '@codemirror/lang-java';
@@ -7,9 +7,11 @@ import { python } from '@codemirror/lang-python';
 import { oneDark } from '@codemirror/theme-one-dark';
 
 import { CODING_LANGUAGE_LABELS, CODING_LANGUAGE_OPTIONS } from './codingLanguages';
-import type { CodingTask } from './api';
+import { saveCodingTaskDraft, type CodingTask } from './api';
 
 type ThemeMode = 'light' | 'dark';
+
+const DRAFT_AUTOSAVE_DELAY_MS = 30000;
 
 function codingLanguageExtensions(language: string) {
   if (language === 'python') return [python()];
@@ -29,11 +31,43 @@ export default function CodingWorkspace({
   theme: ThemeMode;
   onSubmit: (task: CodingTask, language: string, code: string) => Promise<void>;
 }) {
-  const [language, setLanguage] = useState(task.submitted_language || task.language || 'python');
-  const [code, setCode] = useState(task.submitted_code || task.starter_code || '');
+  const initialLanguage = task.submitted_language || task.draft_language || task.language || 'python';
+  const initialCode = task.submitted_code || task.draft_code || task.starter_code || '';
+  const [language, setLanguage] = useState(initialLanguage);
+  const [code, setCode] = useState(initialCode);
   const [submitting, setSubmitting] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [draftStatus, setDraftStatus] = useState(task.draft_code ? '已恢复草稿' : '');
   const [error, setError] = useState('');
+  const [savedDraftKey, setSavedDraftKey] = useState(`${initialLanguage}\n${initialCode}`);
   const isSubmitted = task.status === 'submitted';
+  const draftKey = useMemo(() => `${language}\n${code}`, [code, language]);
+
+  const saveDraft = useCallback(async (silent = false) => {
+    if (isSubmitted || savingDraft || draftKey === savedDraftKey) return;
+    setSavingDraft(true);
+    if (!silent) setDraftStatus('');
+    setError('');
+    try {
+      const saved = await saveCodingTaskDraft(task.id, language, code);
+      setSavedDraftKey(`${saved.draft_language || language}\n${saved.draft_code || ''}`);
+      setDraftStatus(silent ? '草稿已自动保存' : '草稿已保存');
+    } catch (err) {
+      if (!silent) {
+        setError(err instanceof Error ? err.message : '保存草稿失败，请稍后重试');
+      }
+    } finally {
+      setSavingDraft(false);
+    }
+  }, [code, draftKey, isSubmitted, language, savedDraftKey, savingDraft, task.id]);
+
+  useEffect(() => {
+    if (isSubmitted || draftKey === savedDraftKey) return undefined;
+    const timer = window.setTimeout(() => {
+      void saveDraft(true);
+    }, DRAFT_AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [draftKey, isSubmitted, saveDraft, savedDraftKey]);
 
   const handleSubmitCode = async () => {
     if (!code.trim() || submitting || isSubmitted) return;
@@ -109,7 +143,7 @@ export default function CodingWorkspace({
             <button
               className="secondary-button"
               onClick={() => setCode(task.starter_code || '')}
-              disabled={isSubmitted || submitting}
+              disabled={isSubmitted || submitting || savingDraft}
             >
               重置模板
             </button>
@@ -130,14 +164,27 @@ export default function CodingWorkspace({
           />
           {error && <div className="login-error" role="alert">{error}</div>}
           <div className="coding-submit-row">
-            <span>{isSubmitted ? `提交语言：${CODING_LANGUAGE_LABELS[language] || language}` : '真实面试模式：不提供运行验证'}</span>
-            <button
-              className="inline-start-button"
-              onClick={() => void handleSubmitCode()}
-              disabled={isSubmitted || submitting || !code.trim()}
-            >
-              {isSubmitted ? '已提交' : submitting ? '提交中...' : '提交代码'}
-            </button>
+            <span>
+              {isSubmitted
+                ? `提交语言：${CODING_LANGUAGE_LABELS[language] || language}`
+                : draftStatus || '真实面试模式：不提供运行验证'}
+            </span>
+            <div className="coding-submit-actions">
+              <button
+                className="secondary-button"
+                onClick={() => void saveDraft(false)}
+                disabled={isSubmitted || submitting || savingDraft || draftKey === savedDraftKey}
+              >
+                {savingDraft ? '保存中' : '保存草稿'}
+              </button>
+              <button
+                className="inline-start-button"
+                onClick={() => void handleSubmitCode()}
+                disabled={isSubmitted || submitting || !code.trim()}
+              >
+                {isSubmitted ? '已提交' : submitting ? '提交中...' : '提交代码'}
+              </button>
+            </div>
           </div>
         </section>
       </div>

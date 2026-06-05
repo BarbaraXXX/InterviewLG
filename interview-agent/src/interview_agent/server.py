@@ -31,6 +31,7 @@ from interview_agent.db import (
     list_session_coding_tasks,
     list_user_resumes,
     list_user_sessions,
+    save_coding_task_draft_for_user,
     submit_coding_task_for_user,
     update_resume,
     upsert_user_interview_config,
@@ -192,6 +193,11 @@ class ResumeRequest(BaseModel):
 
 
 class CodingTaskSubmitRequest(BaseModel):
+    language: str
+    code: str
+
+
+class CodingTaskDraftRequest(BaseModel):
     language: str
     code: str
 
@@ -385,6 +391,8 @@ def _serialize_coding_task(task: dict | None) -> dict | None:
         "starter_code": task["starter_code"],
         "constraints": _parse_json_list(task["constraints_json"]),
         "examples": _parse_json_list(task["examples_json"]),
+        "draft_language": task["draft_language"],
+        "draft_code": task["draft_code"],
         "submitted_language": task["submitted_language"],
         "submitted_code": task["submitted_code"],
         "status": task["status"],
@@ -714,6 +722,24 @@ async def submit_coding_task(task_id: str, req: CodingTaskSubmitRequest, usernam
         "task": _serialize_coding_task(task),
         "context_message": _build_code_submission_context(task, language, code),
     }
+
+
+@app.put("/api/coding-tasks/{task_id}/draft")
+async def save_coding_task_draft(task_id: str, req: CodingTaskDraftRequest, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    existing = await get_coding_task_for_user(task_id, user["id"])
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Coding task not found")
+    if existing["status"] != "active":
+        raise HTTPException(status_code=409, detail="Submitted coding task cannot be edited")
+
+    language = _clean_coding_language(req.language)
+    if len(req.code) > _MAX_CODE_SUBMISSION_LEN:
+        raise HTTPException(status_code=400, detail="Code draft too long")
+    task = await save_coding_task_draft_for_user(task_id, user["id"], language, req.code)
+    if task is None:
+        raise HTTPException(status_code=409, detail="Submitted coding task cannot be edited")
+    return {"task": _serialize_coding_task(task)}
 
 
 @app.post("/api/sessions/{session_id}/end")

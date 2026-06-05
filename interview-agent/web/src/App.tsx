@@ -286,13 +286,20 @@ function ConsoleTopbar({
     <header className="console-topbar">
       <div className="brand-lockup">
         <LogoMark />
+        {onHome && (
+          <button className="topbar-back-button" onClick={onHome} aria-label="返回工作台">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M19 12H5M12 5L5 12L12 19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>返回工作台</span>
+          </button>
+        )}
         <span>{title}</span>
       </div>
       <div className="user-badge">
         <span className="system-pill">已登录</span>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
         <span className="user-badge-name">{username}</span>
-        {onHome && <button className="ghost-link" onClick={onHome}>工作台</button>}
         <button className="logout-link" onClick={onLogout}>退出</button>
       </div>
     </header>
@@ -1365,12 +1372,23 @@ function HistoryView({
                         <article className="history-coding-card" key={task.id}>
                           <div className="qa-card-head">
                             <span>Task {index + 1}</span>
-                            <small>{task.status === 'submitted' ? `已提交 · ${formatDateTime(task.submitted_at)}` : '未提交'}</small>
+                            <small>
+                              {task.status === 'submitted'
+                                ? `已提交 · ${formatDateTime(task.submitted_at)}`
+                                : task.draft_code
+                                  ? '未提交 · 已保存草稿'
+                                  : '未提交'}
+                            </small>
                           </div>
                           <h3>{task.title}</h3>
                           <p>{task.description}</p>
                           {task.submitted_code ? (
                             <pre><code>{task.submitted_code}</code></pre>
+                          ) : task.draft_code ? (
+                            <>
+                              <div className="history-empty">这道题还没有提交，下面是已保存的草稿。</div>
+                              <pre><code>{task.draft_code}</code></pre>
+                            </>
                           ) : (
                             <div className="history-empty">这道题还没有提交代码。</div>
                           )}

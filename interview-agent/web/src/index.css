@@ -247,6 +247,7 @@ body {
 .brand-lockup {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: var(--space-3);
   font-size: 0.875rem;
   font-weight: 700;
@@ -874,6 +875,35 @@ body {
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
+}
+
+.topbar-back-button {
+  min-height: 34px;
+  padding: 0 var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--color-accent);
+  background: var(--color-accent-dim);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.topbar-back-button:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+  border-color: var(--color-accent-border);
+  transform: translateY(-1px);
+}
+
+.topbar-back-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .dashboard-shell,
@@ -2485,6 +2515,14 @@ body {
 }
 
 .coding-submit-row {
+  flex-wrap: wrap;
+}
+
+.coding-submit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 

@@ -39,6 +39,8 @@ export interface CodingTask {
   starter_code: string;
   constraints: string[];
   examples: CodingTaskExample[];
+  draft_language: string | null;
+  draft_code: string | null;
   submitted_language: string | null;
   submitted_code: string | null;
   status: 'active' | 'submitted';
@@ -298,6 +300,23 @@ export async function submitCodingTask(taskId: string, language: string, code: s
     throw new Error(data.detail || 'Failed to submit coding task');
   }
   return { task: data.task, contextMessage: data.context_message };
+}
+
+export async function saveCodingTaskDraft(taskId: string, language: string, code: string): Promise<CodingTask> {
+  const res = await fetch(`${API_BASE}/coding-tasks/${taskId}/draft`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+    body: JSON.stringify({ language, code }),
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to save coding task draft');
+  }
+  return data.task;
 }
 
 export async function endInterviewSession(sessionId: string): Promise<void> {

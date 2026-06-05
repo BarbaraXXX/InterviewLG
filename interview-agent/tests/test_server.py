@@ -405,6 +405,18 @@ def test_coding_task_active_and_submit(auth_client):
     assert task["constraints"] == ["只需要返回任意一种答案"]
     assert task["examples"][0]["output"] == "[0,1]"
 
+    draft = auth_client.put(
+        "/api/coding-tasks/task-1/draft",
+        json={"language": "python", "code": "class Solution:\n    def twoSum(self, nums, target):\n        pass"},
+    )
+    assert draft.status_code == 200
+    assert draft.json()["task"]["draft_code"].endswith("pass")
+
+    active_after_draft = auth_client.get("/api/sessions/sid-code/coding-task/active")
+    assert active_after_draft.status_code == 200
+    assert active_after_draft.json()["task"]["draft_language"] == "python"
+    assert active_after_draft.json()["task"]["draft_code"].endswith("pass")
+
     submitted = auth_client.post(
         "/api/coding-tasks/task-1/submit",
         json={"language": "python", "code": "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]"},
@@ -420,6 +432,12 @@ def test_coding_task_active_and_submit(auth_client):
         json={"language": "python", "code": "print('again')"},
     )
     assert repeat.status_code == 409
+
+    draft_after_submit = auth_client.put(
+        "/api/coding-tasks/task-1/draft",
+        json={"language": "python", "code": "print('late draft')"},
+    )
+    assert draft_after_submit.status_code == 409
 
     active_after_submit = auth_client.get("/api/sessions/sid-code/coding-task/active")
     assert active_after_submit.status_code == 200
