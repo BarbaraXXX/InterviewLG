@@ -28,6 +28,7 @@ import {
   type ResumeProject,
 } from './api';
 import { RELEASE_NOTES } from './releaseNotes';
+import { APP_VERSION } from './version';
 
 type View = 'loading' | 'login' | 'dashboard' | 'setup' | 'chat' | 'profile' | 'history' | 'insights';
 type ThemeMode = 'light' | 'dark';
@@ -603,7 +604,10 @@ function DashboardView({
           <section className="release-panel" aria-label="版本更新记录">
             <div className="release-panel-head">
               <p className="eyebrow">Updates</p>
-              <h2>版本更新记录</h2>
+              <div className="release-title-row">
+                <h2>版本更新记录</h2>
+                <span>{APP_VERSION}</span>
+              </div>
               <p>这里展示最近部署后的主要功能变化。</p>
             </div>
             <div className="release-list">
@@ -2228,6 +2232,7 @@ function App() {
         />
       )}
       <footer className="site-footer">
+        <span className="app-version">Interview Agent {APP_VERSION}</span>
         <a className="beian-link" href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">
           浙ICP备2026035635号
         </a>
