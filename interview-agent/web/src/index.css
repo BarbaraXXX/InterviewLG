@@ -2474,6 +2474,16 @@ body {
   overflow: hidden;
 }
 
+.coding-editor-panel .cm-editor.cm-focused {
+  outline: none;
+  border-color: var(--color-accent-border);
+  box-shadow: 0 0 0 3px var(--color-accent-dim);
+}
+
+.coding-editor-panel .cm-scroller:focus-visible {
+  outline: none;
+}
+
 .coding-submit-row {
   flex-wrap: wrap;
 }
