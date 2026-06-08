@@ -21,6 +21,8 @@ async def test_session_state_created_with_session(isolate_env):
     assert state["stage"] == "opening"
     assert state["stage_round"] == 0
     assert state["total_round"] == 0
+    assert state["current_topic"] == ""
+    assert state["topic_status"] == "not_started"
 
 
 async def test_advance_session_state_moves_opening_to_project(isolate_env):
@@ -57,7 +59,9 @@ def test_format_state_context():
             "stage": "project",
             "stage_round": 2,
             "total_round": 4,
-            "covered_topics": '["Redis", "MySQL"]',
+            "current_topic": "LangGraph 架构",
+            "topic_status": "probing",
+            "covered_topics": '[{"topic": "Redis", "quality": "good"}, "MySQL"]',
             "pending_focus": "继续项目深挖",
             "last_user_quality": "partial",
         }
@@ -66,5 +70,7 @@ def test_format_state_context():
     assert "当前面试状态" in context
     assert "校招正式岗" in context
     assert "项目深挖" in context
-    assert "Redis、MySQL" in context
+    assert "LangGraph 架构" in context
+    assert "追问中" in context
+    assert "Redis(good)、MySQL" in context
     assert "不要直接向候选人复述" in context

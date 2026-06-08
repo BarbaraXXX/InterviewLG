@@ -715,9 +715,13 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
     async def fake_advance(*args, **kwargs):
         return {}
 
+    async def fake_record_turn_state(*args, **kwargs):
+        return {}
+
     monkeypatch.setattr(server_module, "session_manager", fake_manager)
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
     monkeypatch.setattr(server_module, "advance_session_state", fake_advance)
+    monkeypatch.setattr(server_module, "record_turn_state", fake_record_turn_state)
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
 
     with auth_client.stream("POST", "/api/chat/stream", json={"session_id": "sid", "message": "继续问 Redis"}) as resp:
@@ -745,9 +749,13 @@ def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):
     async def fake_advance(*args, **kwargs):
         return {}
 
+    async def fake_record_turn_state(*args, **kwargs):
+        return {}
+
     monkeypatch.setattr(server_module, "session_manager", fake_manager)
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
     monkeypatch.setattr(server_module, "advance_session_state", fake_advance)
+    monkeypatch.setattr(server_module, "record_turn_state", fake_record_turn_state)
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
 
     with auth_client.stream(

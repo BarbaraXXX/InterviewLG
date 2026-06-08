@@ -25,9 +25,11 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
             "stage": "coding",
             "stage_round": 1,
             "total_round": 3,
+            "current_topic": "反转链表",
+            "topic_status": "probing",
             "covered_topics": "[]",
-            "pending_focus": "",
-            "last_user_quality": "",
+            "pending_focus": "边界条件",
+            "last_user_quality": "partial",
         }
 
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
@@ -48,7 +50,10 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
         HumanMessage,
         SystemMessage,
         SystemMessage,
+        SystemMessage,
     ]
-    assert agent_input.messages[-3].content == "完整代码上下文"
-    assert "当前面试状态" in agent_input.messages[-2].content
+    assert agent_input.messages[-4].content == "完整代码上下文"
+    assert "当前面试状态" in agent_input.messages[-3].content
+    assert "本轮流程控制" in agent_input.messages[-2].content
     assert "真实面试题参考" in agent_input.messages[-1].content
+    assert "边界条件" in agent_input.stage_control_context

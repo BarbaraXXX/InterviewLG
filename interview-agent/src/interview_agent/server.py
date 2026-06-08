@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -42,6 +43,7 @@ from interview_agent.logging_config import setup_logging
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS
 from interview_agent.session import session_manager
+from interview_agent.state_updater import record_turn_state
 
 logger = logging.getLogger(__name__)
 
@@ -834,6 +836,16 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             len(agent_input.rag_context),
         )
 
+    async def record_interview_state_safely(user_message: str, agent_reply: str) -> None:
+        try:
+            await record_turn_state(
+                session_id=req.session_id,
+                user_message=user_message,
+                agent_reply=agent_reply,
+            )
+        except Exception:
+            logger.warning("interview state update failed session=%s", req.session_id, exc_info=True)
+
     async def event_generator():
         full_content = ""
         async for event in ses.agent.astream_events(
@@ -856,6 +868,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
         if full_content:
             await session_manager.append_message(req.session_id, "ai", full_content)
+            asyncio.create_task(record_interview_state_safely(context_message or display_message, full_content))
         logger.info("chat_stream end user=%s session=%s reply_len=%d", username, req.session_id, len(full_content))
         yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 

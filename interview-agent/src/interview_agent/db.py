@@ -111,9 +111,12 @@ async def init_db() -> None:
                 stage TEXT NOT NULL DEFAULT 'opening',
                 stage_round INTEGER NOT NULL DEFAULT 0,
                 total_round INTEGER NOT NULL DEFAULT 0,
+                current_topic TEXT NOT NULL DEFAULT '',
+                topic_status TEXT NOT NULL DEFAULT 'not_started',
                 covered_topics TEXT NOT NULL DEFAULT '[]',
                 pending_focus TEXT NOT NULL DEFAULT '',
                 last_user_quality TEXT NOT NULL DEFAULT '',
+                stage_goal_status TEXT NOT NULL DEFAULT '{}',
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
@@ -129,6 +132,9 @@ async def init_db() -> None:
         await _ensure_column(db, "sessions", "resume_title_snapshot", "TEXT NOT NULL DEFAULT ''")
         await _ensure_column(db, "coding_tasks", "draft_language", "TEXT")
         await _ensure_column(db, "coding_tasks", "draft_code", "TEXT")
+        await _ensure_column(db, "session_states", "current_topic", "TEXT NOT NULL DEFAULT ''")
+        await _ensure_column(db, "session_states", "topic_status", "TEXT NOT NULL DEFAULT 'not_started'")
+        await _ensure_column(db, "session_states", "stage_goal_status", "TEXT NOT NULL DEFAULT '{}'")
         await db.commit()
         logger.info("database initialized at %s", _DB_PATH)
     finally:
@@ -232,7 +238,8 @@ async def get_session_state(session_id: str) -> dict | None:
     try:
         async with db.execute(
             "SELECT session_id, target, stage, stage_round, total_round, covered_topics, "
-            "pending_focus, last_user_quality, updated_at FROM session_states WHERE session_id = ?",
+            "current_topic, topic_status, pending_focus, last_user_quality, stage_goal_status, updated_at "
+            "FROM session_states WHERE session_id = ?",
             (session_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -274,6 +281,50 @@ async def set_session_state_stage(session_id: str, stage: str) -> dict | None:
         await db.commit()
     finally:
         await db.close()
+    return await get_session_state(session_id)
+
+
+async def update_session_state_control(
+    session_id: str,
+    *,
+    stage: str | None = None,
+    current_topic: str | None = None,
+    topic_status: str | None = None,
+    covered_topics: str | None = None,
+    pending_focus: str | None = None,
+    last_user_quality: str | None = None,
+    stage_goal_status: str | None = None,
+) -> dict | None:
+    row = await get_session_state(session_id)
+    if row is None:
+        return None
+
+    next_stage = stage if stage is not None else row["stage"]
+    stage_round = 0 if stage is not None and stage != row["stage"] else row["stage_round"]
+
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE session_states SET "
+            "stage = ?, stage_round = ?, current_topic = ?, topic_status = ?, covered_topics = ?, "
+            "pending_focus = ?, last_user_quality = ?, stage_goal_status = ?, updated_at = datetime('now') "
+            "WHERE session_id = ?",
+            (
+                next_stage,
+                stage_round,
+                current_topic if current_topic is not None else row["current_topic"],
+                topic_status if topic_status is not None else row["topic_status"],
+                covered_topics if covered_topics is not None else row["covered_topics"],
+                pending_focus if pending_focus is not None else row["pending_focus"],
+                last_user_quality if last_user_quality is not None else row["last_user_quality"],
+                stage_goal_status if stage_goal_status is not None else row["stage_goal_status"],
+                session_id,
+            ),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
     return await get_session_state(session_id)
 
 
