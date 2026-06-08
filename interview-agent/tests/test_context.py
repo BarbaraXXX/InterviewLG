@@ -23,7 +23,7 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
     agent_input = await context_module.build_agent_input(
         session_id="sid-1",
         domain="backend",
-        difficulty="mid",
+        difficulty="campus_fulltime",
         display_message="已提交代码题：反转链表",
         context_message="完整代码上下文",
         load_messages=fake_load_messages,

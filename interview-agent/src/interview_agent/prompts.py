@@ -33,15 +33,24 @@ PRESET_DOMAINS: dict[str, str] = {
     ),
 }
 
-DIFFICULTY_PROMPTS: dict[str, str] = {
-    "junior": "面试难度为初级（1-3年经验），侧重基础概念和简单实现。",
-    "mid": "面试难度为中级（3-5年经验），侧重深度理解和实际场景。",
-    "senior": "面试难度为高级（5年以上经验），侧重架构设计和技术决策。",
+INTERVIEW_TARGET_PROMPTS: dict[str, str] = {
+    "campus_intern": (
+        "面试目标为校招实习岗位，侧重基础知识、编码基本功、学习能力、表达清晰度和对项目参与内容的理解。"
+    ),
+    "campus_fulltime": (
+        "面试目标为校招正式岗位，侧重基础扎实度、项目理解、工程意识、边界条件分析和独立解决问题能力。"
+    ),
+}
+
+_LEGACY_TARGET_ALIASES = {
+    "junior": "campus_intern",
+    "mid": "campus_fulltime",
+    "senior": "campus_fulltime",
 }
 
 _BASE_TEMPLATE = (
     "你是一位经验丰富的技术面试官，正在对候选人进行模拟技术面试。\n\n"
-    "{domain_desc}\n{difficulty_desc}\n{jd_desc}\n{profile_desc}\n"
+    "{domain_desc}\n{target_desc}\n{jd_desc}\n{profile_desc}\n"
     "面试流程规则：\n"
     "1. 开场先简短自我介绍，然后请候选人自我介绍\n"
     "2. 根据候选人的背景和面试领域，逐步提出技术问题\n"
@@ -57,7 +66,7 @@ _BASE_TEMPLATE = (
     "- 收到候选人的代码提交上下文后，再评价思路、复杂度、边界条件和代码质量，并继续追问或进入下一环节\n\n"
     "注意事项：\n"
     "- 保持专业但友好的语气\n"
-    "- 难度动态调整：候选人回答停留在概念层面则降低难度，能结合实战则维持，深入到原理和优化则可升级；连续2个问题回答质量低于当前难度时应主动降级\n"
+    "- 追问深度动态调整：候选人回答停留在概念层面则降低追问深度，能结合实战则维持，深入到原理和优化则可适当升级；不要用社招年限标准要求候选人\n"
     "- 不要在候选人明显无法深入时继续追问更深层的问题\n"
     "- 如果候选人的回答有误，温和指出并解释正确答案\n"
     "- 鼓励候选人思考，必要时给出提示\n"
@@ -69,13 +78,19 @@ def _escape_format(text: str) -> str:
     return text.replace("{", "{{").replace("}", "}}")
 
 
+def _normalize_interview_target(value: str) -> str:
+    normalized = value.strip()
+    return _LEGACY_TARGET_ALIASES.get(normalized, normalized)
+
+
 def build_system_prompt(domain: str, difficulty: str, structured_jd: str = "", structured_profile: str = "") -> str:
     domain_desc = PRESET_DOMAINS.get(domain)
     if not domain_desc:
         safe_domain = domain[:32].replace("{", "").replace("}", "").replace("\n", " ")
         domain_desc = f"你专注于{safe_domain}领域的技术面试，针对该领域的技术栈和知识点进行深入考察。"
 
-    difficulty_desc = DIFFICULTY_PROMPTS.get(difficulty, DIFFICULTY_PROMPTS["mid"])
+    target = _normalize_interview_target(difficulty)
+    target_desc = INTERVIEW_TARGET_PROMPTS.get(target, INTERVIEW_TARGET_PROMPTS["campus_fulltime"])
 
     jd_desc = ""
     if structured_jd:
@@ -97,4 +112,4 @@ def build_system_prompt(domain: str, difficulty: str, structured_jd: str = "", s
             "以上信息仅供参考，不要在面试中直接复述。\n"
         )
 
-    return _BASE_TEMPLATE.format(domain_desc=domain_desc, difficulty_desc=difficulty_desc, jd_desc=jd_desc, profile_desc=profile_desc)
+    return _BASE_TEMPLATE.format(domain_desc=domain_desc, target_desc=target_desc, jd_desc=jd_desc, profile_desc=profile_desc)

@@ -156,7 +156,7 @@ async def api_me(username: str = Depends(get_current_user)) -> dict:
 
 class CreateSessionRequest(BaseModel):
     domain: str
-    difficulty: str = "mid"
+    difficulty: str = "campus_fulltime"
     job_description: str = ""
     profile_company: str = ""
     profile_position: str = ""
@@ -252,8 +252,14 @@ def _format_profile(profile_data: dict) -> str:
 
     diff = profile_data.get("difficulty_tendency", "")
     if diff:
-        diff_labels = {"junior": "初级", "mid": "中级", "senior": "高级"}
-        parts.append(f"难度倾向：{diff_labels.get(diff, diff)}")
+        diff_labels = {
+            "campus_intern": "校招实习",
+            "campus_fulltime": "校招正式岗",
+            "junior": "校招实习",
+            "mid": "校招正式岗",
+            "senior": "校招正式岗",
+        }
+        parts.append(f"目标岗位倾向：{diff_labels.get(diff, diff)}")
 
     focus = profile_data.get("focus_areas", [])
     if focus:

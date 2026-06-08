@@ -21,10 +21,10 @@ async def run() -> None:
     print(f"\n可选领域: {', '.join(PRESET_DOMAINS.keys())}，或输入自定义领域")
     domain = input("面试领域: ").strip() or "backend"
 
-    print("难度选择: junior / mid / senior")
-    difficulty = input("面试难度 [mid]: ").strip() or "mid"
+    print("目标岗位: campus_intern（校招实习） / campus_fulltime（校招正式岗）")
+    difficulty = input("目标岗位 [campus_fulltime]: ").strip() or "campus_fulltime"
 
-    print(f"\n领域: {domain} | 难度: {difficulty}")
+    print(f"\n领域: {domain} | 目标岗位: {difficulty}")
     print("输入 'quit' 或 'exit' 结束面试\n")
 
     agent = await build_interview_agent(domain, difficulty)

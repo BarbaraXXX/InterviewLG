@@ -123,11 +123,31 @@ function clearHistoryNoticeDismissed(): void {
   }
 }
 
+const DEFAULT_INTERVIEW_TARGET = 'campus_fulltime';
+
 const DIFFICULTY_OPTIONS = [
-  { value: 'junior', label: '初级', meta: '实习至 1 年经验', description: '侧重基础概念、常见业务实现、代码可读性与排错思路。' },
-  { value: 'mid', label: '中级', meta: '1 至 3 年经验', description: '加入工程实践、模块设计、性能取舍和线上问题处理。' },
-  { value: 'senior', label: '高级', meta: '3 年以上经验', description: '强调系统设计、技术决策、复杂场景拆解和跨团队协作。' },
+  { value: 'campus_intern', label: '校招实习', meta: '实习岗位准备', description: '侧重基础知识、编码基本功、学习能力和表达清晰度。' },
+  { value: 'campus_fulltime', label: '校招正式岗', meta: '应届正式岗位准备', description: '覆盖基础扎实度、项目理解、工程意识和独立解决问题能力。' },
 ];
+
+const LEGACY_DIFFICULTY_LABELS: Record<string, string> = {
+  junior: '校招实习',
+  mid: '校招正式岗',
+  senior: '校招正式岗',
+};
+
+function normalizeInterviewTarget(value: string): string {
+  if (DIFFICULTY_OPTIONS.some((option) => option.value === value)) return value;
+  if (value === 'junior') return 'campus_intern';
+  if (value === 'mid' || value === 'senior') return 'campus_fulltime';
+  return DEFAULT_INTERVIEW_TARGET;
+}
+
+function getInterviewTargetLabel(value: string): string {
+  return DIFFICULTY_OPTIONS.find((option) => option.value === value)?.label
+    || LEGACY_DIFFICULTY_LABELS[value]
+    || value;
+}
 
 const DEFAULT_DOMAINS = [
   'backend', 'frontend', 'fullstack', 'algorithm',
@@ -391,7 +411,7 @@ function LoginView({ onLogin }: { onLogin: (username: string) => void }) {
             <p className="eyebrow">AI Interview Console</p>
             <h1>把一次技术面试拆成可控的练习流程</h1>
             <p>
-              选择方向、难度与岗位信息后进入模拟问答。系统会围绕目标岗位持续追问，适合面试前做集中演练。
+              选择技术方向、目标岗位与岗位信息后进入模拟问答。系统会围绕校招场景持续追问，适合面试前做集中演练。
             </p>
           </div>
 
@@ -402,9 +422,9 @@ function LoginView({ onLogin }: { onLogin: (username: string) => void }) {
               <small>技术方向</small>
             </div>
             <div>
-              <span>Levels</span>
-              <strong>3</strong>
-              <small>面试难度</small>
+              <span>Targets</span>
+              <strong>2</strong>
+              <small>目标岗位</small>
             </div>
             <div>
               <span>Context</span>
@@ -417,7 +437,7 @@ function LoginView({ onLogin }: { onLogin: (username: string) => void }) {
             <div>
               <span>01</span>
               <strong>配置目标</strong>
-              <p>确认技术方向、岗位难度和目标 JD。</p>
+              <p>确认技术方向、目标岗位和目标 JD。</p>
             </div>
             <div>
               <span>02</span>
@@ -426,8 +446,8 @@ function LoginView({ onLogin }: { onLogin: (username: string) => void }) {
             </div>
             <div>
               <span>03</span>
-              <strong>调整强度</strong>
-              <p>按当前准备阶段切换初级、中级或高级难度。</p>
+              <strong>匹配校招场景</strong>
+              <p>按实习或正式岗目标匹配不同的考察侧重。</p>
             </div>
           </div>
         </section>
@@ -585,7 +605,7 @@ function DashboardView({
             <div className="dashboard-primary-action">
               <span>Recommended</span>
               <strong>开始一轮新的模拟面试</strong>
-              <p>配置方向、难度和 JD 后进入连续追问。</p>
+              <p>配置方向、目标岗位和 JD 后进入连续追问。</p>
               <button className="start-button launch-button" onClick={onStartInterview}>开始模拟面试</button>
             </div>
           </section>
@@ -595,7 +615,7 @@ function DashboardView({
               <em>01</em>
               <span>开始面试配置</span>
               <strong>模拟技术面试</strong>
-              <small>选择技术方向、难度、JD 与面试偏好，进入 AI 面试官对话。</small>
+              <small>选择技术方向、目标岗位、JD 与面试偏好，进入 AI 面试官对话。</small>
             </button>
             <button className="workspace-action" onClick={onProfile}>
               <em>02</em>
@@ -607,7 +627,7 @@ function DashboardView({
               <em>03</em>
               <span>历史记录</span>
               <strong>查看过往面试</strong>
-              <small>后续展示每次练习的方向、难度、时间和面试状态。</small>
+              <small>后续展示每次练习的方向、目标岗位、时间和面试状态。</small>
             </button>
             <button className="workspace-action" onClick={onInsights}>
               <em>04</em>
@@ -631,7 +651,7 @@ function DashboardView({
               <span>Latest</span>
               <strong>
                 {latestSession
-                  ? `${DOMAIN_LABELS[latestSession.domain] || latestSession.domain} / ${DIFFICULTY_OPTIONS.find((d) => d.value === latestSession.difficulty)?.label || latestSession.difficulty}`
+                  ? `${DOMAIN_LABELS[latestSession.domain] || latestSession.domain} / ${getInterviewTargetLabel(latestSession.difficulty)}`
                   : '暂无记录'}
               </strong>
               <small>
@@ -1337,7 +1357,7 @@ function HistoryView({
                       onChange={() => toggleCheckedSession(session.id)}
                     />
                     <span>{STATUS_LABELS[session.status] || session.status}</span>
-                    <strong>{DOMAIN_LABELS[session.domain] || session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === session.difficulty)?.label || session.difficulty}</strong>
+                    <strong>{DOMAIN_LABELS[session.domain] || session.domain} / {getInterviewTargetLabel(session.difficulty)}</strong>
                     <small>{formatDateTime(session.created_at)} · {session.message_count} 条消息</small>
                   </label>
                 ) : (
@@ -1348,7 +1368,7 @@ function HistoryView({
                     aria-pressed={session.id === selectedId}
                   >
                     <span>{STATUS_LABELS[session.status] || session.status}</span>
-                    <strong>{DOMAIN_LABELS[session.domain] || session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === session.difficulty)?.label || session.difficulty}</strong>
+                    <strong>{DOMAIN_LABELS[session.domain] || session.domain} / {getInterviewTargetLabel(session.difficulty)}</strong>
                     <small>{formatDateTime(session.created_at)} · {session.message_count} 条消息</small>
                   </button>
                 )
@@ -1370,7 +1390,7 @@ function HistoryView({
                 <div className="history-detail-head">
                   <div>
                     <p className="eyebrow">Interview Detail</p>
-                    <h2>{DOMAIN_LABELS[detail.session.domain] || detail.session.domain} / {DIFFICULTY_OPTIONS.find((d) => d.value === detail.session.difficulty)?.label || detail.session.difficulty}</h2>
+                    <h2>{DOMAIN_LABELS[detail.session.domain] || detail.session.domain} / {getInterviewTargetLabel(detail.session.difficulty)}</h2>
                     <p>{formatDateTime(detail.session.created_at)} 开始，状态：{STATUS_LABELS[detail.session.status] || detail.session.status}</p>
                     {detail.session.resume_title_snapshot && (
                       <p>本次使用简历：{detail.session.resume_title_snapshot}</p>
@@ -1484,7 +1504,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [selectedResumeId, setSelectedResumeId] = useState<number | null>(null);
   const [resumeLoadError, setResumeLoadError] = useState(false);
-  const [difficulty, setDifficulty] = useState('mid');
+  const [difficulty, setDifficulty] = useState(DEFAULT_INTERVIEW_TARGET);
   const [jobDescription, setJobDescription] = useState('');
   const [profiles, setProfiles] = useState<{key: string; company: string; position: string; source_count: number}[]>([]);
   const [selectedProfileIdx, setSelectedProfileIdx] = useState(-1);
@@ -1537,7 +1557,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
       setCustomDomain(config.domain);
     }
 
-    setDifficulty(config.difficulty || 'mid');
+    setDifficulty(normalizeInterviewTarget(config.difficulty || DEFAULT_INTERVIEW_TARGET));
     setJobDescription(config.job_description || '');
 
     if (config.resume_id && availableResumes.some((resume) => resume.id === config.resume_id)) {
@@ -1617,7 +1637,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
       profileCompany = profiles[selectedProfileIdx].company;
       profilePosition = profiles[selectedProfileIdx].position;
     }
-    onStart(activeDomain, difficulty, jobDescription, profileCompany, profilePosition, selectedResumeId);
+    onStart(activeDomain, normalizeInterviewTarget(difficulty), jobDescription, profileCompany, profilePosition, selectedResumeId);
   };
 
   return (
@@ -1649,7 +1669,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               <li className={difficulty ? 'complete' : 'active'}>
                 <span>03</span>
                 <div>
-                  <strong>面试难度</strong>
+                  <strong>目标岗位</strong>
                   <small>{activeDifficulty.meta}</small>
                 </div>
               </li>
@@ -1675,7 +1695,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               <div>
                 <p className="eyebrow">Interview Setup</p>
                 <h1 className="setup-title">定制你的技术面试场景</h1>
-                <p className="setup-subtitle">保留必要输入，减少多余选择。方向决定问题范围，难度决定追问深度，JD 会让问题更贴近真实招聘要求。</p>
+                <p className="setup-subtitle">保留必要输入，减少多余选择。方向决定问题范围，目标岗位决定校招考察侧重，JD 会让问题更贴近真实招聘要求。</p>
               </div>
               <div className="config-status config-status-actions">
                 <div>
@@ -1754,7 +1774,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
                   >
                     <span>Default</span>
                     <strong>不使用简历</strong>
-                    <small>按技术方向、难度和 JD 生成通用面试问题。</small>
+                    <small>按技术方向、目标岗位和 JD 生成通用面试问题。</small>
                   </button>
                   {resumes.map((resume) => (
                     <button
@@ -1774,8 +1794,8 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
 
             <section className="config-section">
               <div className="section-heading">
-                <label className="section-label">面试难度</label>
-                <p>按你的目标岗位和经验年限选择，难度越高越强调方案取舍和追问深度。</p>
+                <label className="section-label">目标岗位</label>
+                <p>选择你正在准备的校招岗位类型。实习更关注基础和学习能力，正式岗更关注项目理解和工程意识。</p>
               </div>
               <div className="difficulty-grid">
                 {DIFFICULTY_OPTIONS.map((opt) => (
@@ -1785,7 +1805,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
                     onClick={() => setDifficulty(opt.value)}
                     aria-pressed={difficulty === opt.value}
                   >
-                    <em>{opt.value === 'junior' ? '01' : opt.value === 'mid' ? '02' : '03'}</em>
+                    <em>{opt.value === 'campus_intern' ? '01' : '02'}</em>
                     <span>{opt.label}</span>
                     <strong>{opt.meta}</strong>
                     <small>{opt.description}</small>
@@ -1866,7 +1886,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
                 <strong>{activeDomainLabel}</strong>
               </div>
               <div>
-                <span>难度</span>
+                <span>目标岗位</span>
                 <strong>{activeDifficulty.label}</strong>
               </div>
               <div>
@@ -1882,7 +1902,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               <h2>选择建议</h2>
               <ul className="setup-guide">
                 <li>方向不确定时，优先选择最接近投递岗位主职责的方向。</li>
-                <li>校招、实习或 1 年内经验建议从初级开始。</li>
+                <li>准备实习投递选择校招实习，准备应届正式岗位选择校招正式岗。</li>
                 <li>有明确招聘链接时建议粘贴 JD，问题会更聚焦。</li>
               </ul>
             </div>
@@ -2028,7 +2048,7 @@ function ChatView({
     void onPause();
   };
 
-  const diffLabel = DIFFICULTY_OPTIONS.find((d) => d.value === difficulty)?.label || difficulty;
+  const diffLabel = getInterviewTargetLabel(difficulty);
 
   return (
     <div className={`chat-view ${codingTask ? 'with-coding' : ''}`}>

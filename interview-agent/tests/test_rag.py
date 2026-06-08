@@ -15,13 +15,13 @@ def test_domain_filter_aliases():
 def test_build_rag_query_includes_recent_context():
     query = build_rag_query(
         "redis",
-        "mid",
+        "campus_fulltime",
         "我用过 zset",
         [HumanMessage(content="讲讲 Redis"), AIMessage(content="你了解 zset 吗？")],
     )
 
     assert "redis" in query
-    assert "mid" in query
+    assert "campus_fulltime" in query
     assert "zset" in query
 
 

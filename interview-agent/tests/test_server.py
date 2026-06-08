@@ -236,7 +236,7 @@ def test_create_session_with_resume_snapshot(auth_client, monkeypatch):
 
     resp = auth_client.post(
         "/api/sessions",
-        json={"domain": "backend", "difficulty": "mid", "resume_id": resume["id"]},
+        json={"domain": "backend", "difficulty": "campus_fulltime", "resume_id": resume["id"]},
     )
 
     assert resp.status_code == 200
@@ -308,7 +308,7 @@ def test_create_session_saves_last_interview_config(auth_client, monkeypatch):
         "/api/sessions",
         json={
             "domain": "backend",
-            "difficulty": "mid",
+            "difficulty": "campus_fulltime",
             "job_description": "后端开发 JD",
             "profile_company": "Acme",
             "profile_position": "Backend Engineer",
@@ -319,7 +319,7 @@ def test_create_session_saves_last_interview_config(auth_client, monkeypatch):
 
     second = auth_client.post(
         "/api/sessions",
-        json={"domain": "frontend", "difficulty": "junior"},
+        json={"domain": "frontend", "difficulty": "campus_intern"},
     )
     assert second.status_code == 200
 
@@ -328,7 +328,7 @@ def test_create_session_saves_last_interview_config(auth_client, monkeypatch):
     assert resp.status_code == 200
     config = resp.json()["config"]
     assert config["domain"] == "frontend"
-    assert config["difficulty"] == "junior"
+    assert config["difficulty"] == "campus_intern"
     assert config["job_description"] == ""
     assert config["profile_company"] == ""
     assert config["resume_id"] is None
@@ -340,10 +340,10 @@ def test_list_sessions_returns_current_user_summaries(auth_client):
     async def seed():
       user_id = await create_user("tester", "hash")
       other_id = await create_user("other", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
       await create_message("sid-1", "user", "question content", 0)
       await create_message("sid-1", "ai", "answer content", 1)
-      await db_create_session("sid-other", other_id, "other", "frontend", "junior")
+      await db_create_session("sid-other", other_id, "other", "frontend", "campus_intern")
 
     anyio.run(seed)
 
@@ -364,7 +364,7 @@ def test_get_session_detail_returns_messages_for_owner(auth_client):
 
     async def seed():
       user_id = await create_user("tester", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
       await create_message("sid-1", "user", "我了解缓存", 0)
       await create_message("sid-1", "ai", "那 Redis 为什么快？", 1)
 
@@ -385,7 +385,7 @@ def test_coding_task_active_and_submit(auth_client):
 
     async def seed():
       user_id = await create_user("tester", "hash")
-      await db_create_session("sid-code", user_id, "tester", "backend", "mid")
+      await db_create_session("sid-code", user_id, "tester", "backend", "campus_fulltime")
       return await create_coding_task(
           "task-1",
           "sid-code",
@@ -451,7 +451,7 @@ def test_coding_task_rejects_other_user(auth_client):
     async def seed():
       await create_user("tester", "hash")
       other_id = await create_user("other", "hash")
-      await db_create_session("sid-other", other_id, "other", "backend", "mid")
+      await db_create_session("sid-other", other_id, "other", "backend", "campus_fulltime")
       await create_coding_task("task-other", "sid-other", "反转链表", "反转链表。", "java", "", "[]", "[]")
 
     anyio.run(seed)
@@ -470,7 +470,7 @@ def test_get_session_detail_rejects_other_user_session(auth_client):
     async def seed():
       await create_user("tester", "hash")
       other_id = await create_user("other", "hash")
-      await db_create_session("sid-other", other_id, "other", "frontend", "junior")
+      await db_create_session("sid-other", other_id, "other", "frontend", "campus_intern")
 
     anyio.run(seed)
 
@@ -484,7 +484,7 @@ def test_end_session_marks_completed(auth_client):
 
     async def seed():
       user_id = await create_user("tester", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
 
     anyio.run(seed)
 
@@ -501,7 +501,7 @@ def test_pause_session_marks_paused(auth_client):
 
     async def seed():
       user_id = await create_user("tester", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
 
     anyio.run(seed)
 
@@ -522,7 +522,7 @@ def test_resume_session_returns_messages(auth_client, monkeypatch):
 
     async def seed():
       user_id = await create_user("tester", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "mid", "jd", "profile")
+      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime", "jd", "profile")
       await update_session_status("sid-1", "paused")
       await create_message("sid-1", "user", "上一轮回答", 0)
       await create_message("sid-1", "ai", "上一轮追问", 1)
@@ -545,7 +545,7 @@ def test_resume_completed_session_rejected(auth_client):
 
     async def seed():
       user_id = await create_user("tester", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
       await update_session_status("sid-1", "completed")
 
     anyio.run(seed)
@@ -560,7 +560,7 @@ def test_delete_session_removes_history(auth_client):
 
     async def seed():
       user_id = await create_user("tester", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
+      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
       await create_message("sid-1", "user", "delete me", 0)
 
     anyio.run(seed)
@@ -577,9 +577,9 @@ def test_delete_sessions_batch_removes_current_user_history_only(auth_client):
     async def seed():
       user_id = await create_user("tester", "hash")
       other_id = await create_user("other", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "mid")
-      await db_create_session("sid-2", user_id, "tester", "frontend", "junior")
-      await db_create_session("sid-other", other_id, "other", "backend", "mid")
+      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
+      await db_create_session("sid-2", user_id, "tester", "frontend", "campus_intern")
+      await db_create_session("sid-other", other_id, "other", "backend", "campus_fulltime")
       await create_message("sid-1", "user", "delete me", 0)
 
     anyio.run(seed)
@@ -647,7 +647,7 @@ def test_format_profile_full():
     data = {
         "company": "Acme",
         "position": "SWE",
-        "difficulty_tendency": "senior",
+        "difficulty_tendency": "campus_fulltime",
         "focus_areas": ["distributed systems"],
         "interview_style": "deep technical",
         "question_types": ["system design"],
@@ -657,7 +657,7 @@ def test_format_profile_full():
     out = server_module._format_profile(data)
     assert "Acme" in out
     assert "SWE" in out
-    assert "高级" in out
+    assert "校招正式岗" in out
     assert "distributed systems" in out
     assert "deep technical" in out
     assert "system design" in out
@@ -697,7 +697,7 @@ class FakeSession:
     def __init__(self, agent):
         self.agent = agent
         self.domain = "redis"
-        self.difficulty = "mid"
+        self.difficulty = "campus_fulltime"
         self.username = "tester"
 
 

@@ -38,7 +38,7 @@ def build_rag_query(domain: str, difficulty: str, user_message: str, messages: l
             recent_parts.append(content[:500])
     parts = [
         f"面试方向：{domain}",
-        f"难度：{difficulty}",
+        f"目标岗位：{difficulty}",
         "最近对话：",
         "\n".join(recent_parts),
         f"当前用户回答：{user_message[:1000]}",
