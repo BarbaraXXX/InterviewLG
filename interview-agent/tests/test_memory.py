@@ -1,7 +1,21 @@
 import json
 
-from interview_agent.db import create_message, create_session, create_user, init_db, list_session_memories
-from interview_agent.memory import format_memory_context, summarize_completed_topic
+from interview_agent.db import (
+    create_message,
+    create_session,
+    create_session_memory,
+    create_user,
+    get_user_memory,
+    init_db,
+    list_session_memories,
+)
+from interview_agent.memory import (
+    format_memory_context,
+    format_user_memory_context,
+    load_user_memory_context,
+    summarize_completed_topic,
+    summarize_user_interview_preference,
+)
 
 
 class FakeSummaryResponse:
@@ -25,6 +39,29 @@ class FakeSummaryLLM:
     async def ainvoke(self, messages):
         FakeSummaryLLM.calls += 1
         return FakeSummaryResponse()
+
+
+class FakeUserMemoryResponse:
+    content = json.dumps(
+        {
+            "summary": "用户对 Agent 项目链路较熟，但工程边界分析需要继续观察。",
+            "strengths": ["能结合项目说明 Agent 流程"],
+            "recurring_weaknesses": ["边界条件分析不够完整"],
+            "interview_style_suggestions": ["适合先项目追问，再单点追问异常处理"],
+        },
+        ensure_ascii=False,
+    )
+
+
+class FakeUserMemoryLLM:
+    calls = 0
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    async def ainvoke(self, messages):
+        FakeUserMemoryLLM.calls += 1
+        return FakeUserMemoryResponse()
 
 
 async def test_summarize_completed_topic_creates_memory_once(isolate_env, monkeypatch):
@@ -85,4 +122,82 @@ def test_format_memory_context():
     assert "本场面试长期记忆摘要" in context
     assert "Redis 缓存一致性" in context
     assert "雪崩治理不完整" in context
+    assert "不要直接向候选人复述" in context
+
+
+async def test_summarize_user_interview_preference_upserts_memory(isolate_env, monkeypatch):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session("sid-memory", user_id, "alice", "backend", "campus_fulltime")
+    await create_session_memory(
+        "sid-memory",
+        "topic_summary",
+        "Agent 状态管理",
+        json.dumps(
+            {
+                "topic": "Agent 状态管理",
+                "quality": "partial",
+                "summary": "能说明基础链路，但边界条件分析不足。",
+                "weaknesses": ["边界条件分析不够完整"],
+            },
+            ensure_ascii=False,
+        ),
+        "[1, 2]",
+    )
+    FakeUserMemoryLLM.calls = 0
+    monkeypatch.setattr("interview_agent.memory.ChatOpenAI", FakeUserMemoryLLM)
+
+    memory = await summarize_user_interview_preference(user_id=user_id, session_id="sid-memory")
+
+    assert memory is not None
+    assert FakeUserMemoryLLM.calls == 1
+    assert memory["source_session_id"] == "sid-memory"
+    stored = await get_user_memory(user_id, "interview_preference", "default")
+    assert stored is not None
+    summary = json.loads(stored["summary"])
+    assert "Agent 项目链路" in summary["summary"]
+    assert "边界条件分析不够完整" in summary["recurring_weaknesses"]
+
+
+async def test_summarize_user_interview_preference_skips_without_session_memory(isolate_env, monkeypatch):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session("sid-empty", user_id, "alice", "backend", "campus_fulltime")
+    FakeUserMemoryLLM.calls = 0
+    monkeypatch.setattr("interview_agent.memory.ChatOpenAI", FakeUserMemoryLLM)
+
+    memory = await summarize_user_interview_preference(user_id=user_id, session_id="sid-empty")
+
+    assert memory is None
+    assert FakeUserMemoryLLM.calls == 0
+
+
+async def test_load_user_memory_context(isolate_env):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session("sid-memory", user_id, "alice", "backend", "campus_fulltime")
+    await create_session_memory("sid-memory", "topic_summary", "占位", "{}", "[]")
+    from interview_agent.db import upsert_user_memory
+
+    await upsert_user_memory(
+        user_id,
+        "interview_preference",
+        "default",
+        json.dumps(
+            {
+                "summary": "用户项目表达较清楚。",
+                "strengths": ["项目表达清晰"],
+                "recurring_weaknesses": ["复杂边界条件不足"],
+                "interview_style_suggestions": ["适合做单点追问"],
+            },
+            ensure_ascii=False,
+        ),
+        source_session_id="sid-memory",
+    )
+
+    context = await load_user_memory_context(user_id)
+
+    assert context == format_user_memory_context(await get_user_memory(user_id, "interview_preference", "default"))
+    assert "用户长期面试偏好摘要" in context
+    assert "复杂边界条件不足" in context
     assert "不要直接向候选人复述" in context

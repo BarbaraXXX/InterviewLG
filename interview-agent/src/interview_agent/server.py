@@ -40,7 +40,7 @@ from interview_agent.db import (
     upsert_user_interview_config,
 )
 from interview_agent.logging_config import setup_logging
-from interview_agent.memory import load_memory_context
+from interview_agent.memory import load_memory_context, load_user_memory_context, summarize_user_interview_preference
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS
 from interview_agent.session import session_manager
@@ -656,6 +656,19 @@ async def _get_current_user_row(username: str) -> dict:
     return user
 
 
+async def update_user_memory_safely(user_id: int, session_id: str) -> None:
+    for delay in (0.0, 2.0, 5.0):
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            memory = await summarize_user_interview_preference(user_id=user_id, session_id=session_id)
+        except Exception:
+            logger.warning("user memory update failed user_id=%s session=%s", user_id, session_id, exc_info=True)
+            return
+        if memory is not None:
+            return
+
+
 @app.get("/api/sessions")
 async def list_sessions(username: str = Depends(get_current_user), limit: int = 20) -> dict:
     user = await _get_current_user_row(username)
@@ -759,6 +772,7 @@ async def end_session(session_id: str, username: str = Depends(get_current_user)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     await session_manager.end_session(session_id)
+    asyncio.create_task(update_user_memory_safely(user["id"], session_id))
     return {"ok": True}
 
 
@@ -810,6 +824,9 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
     logger.info("chat_stream start user=%s session=%s msg_len=%d", username, req.session_id, len(req.message))
 
+    async def load_current_user_memory_context(_session_id: str) -> str:
+        return await load_user_memory_context(user["id"])
+
     display_message = req.message.strip()
     context_message = req.context_message.strip()
     await session_manager.append_message(req.session_id, "user", display_message)
@@ -828,6 +845,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
         context_message=context_message,
         load_messages=session_manager.load_messages,
         load_state=get_session_state,
+        load_user_memory_context=load_current_user_memory_context,
         load_memory_context=load_memory_context,
     )
     if agent_input.rag_context:

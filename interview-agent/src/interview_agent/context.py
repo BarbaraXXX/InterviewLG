@@ -23,6 +23,7 @@ class AgentInput:
     rag_cards: list[dict]
     rag_context: str
     state_context: str
+    user_memory_context: str
     memory_context: str
     stage_control_context: str
 
@@ -36,6 +37,7 @@ async def build_agent_input(
     context_message: str,
     load_messages: LoadMessages,
     load_state: LoadState | None = None,
+    load_user_memory_context: LoadMemoryContext | None = None,
     load_memory_context: LoadMemoryContext | None = None,
 ) -> AgentInput:
     """Build the message list sent into the agent graph for a single turn.
@@ -51,6 +53,7 @@ async def build_agent_input(
         run_messages = [*run_messages[:-1], HumanMessage(content=context_message)]
 
     state_context = ""
+    user_memory_context = ""
     memory_context = ""
     stage_control_context = ""
     if load_state is not None:
@@ -58,6 +61,10 @@ async def build_agent_input(
         state_context = format_state_context(state)
         if state_context:
             run_messages = [*run_messages, SystemMessage(content=state_context)]
+        if load_user_memory_context is not None:
+            user_memory_context = await load_user_memory_context(session_id)
+            if user_memory_context:
+                run_messages = [*run_messages, SystemMessage(content=user_memory_context)]
         if load_memory_context is not None:
             memory_context = await load_memory_context(session_id)
             if memory_context:
@@ -77,6 +84,7 @@ async def build_agent_input(
         rag_cards=rag_cards,
         rag_context=rag_context,
         state_context=state_context,
+        user_memory_context=user_memory_context,
         memory_context=memory_context,
         stage_control_context=stage_control_context,
     )

@@ -479,14 +479,22 @@ def test_get_session_detail_rejects_other_user_session(auth_client):
     assert resp.status_code == 404
 
 
-def test_end_session_marks_completed(auth_client):
+def test_end_session_marks_completed(auth_client, monkeypatch):
     import anyio
 
     async def seed():
       user_id = await create_user("tester", "hash")
       await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
 
+    created_tasks = []
+
+    def fake_create_task(coro):
+        created_tasks.append(coro)
+        coro.close()
+        return None
+
     anyio.run(seed)
+    monkeypatch.setattr(server_module.asyncio, "create_task", fake_create_task)
 
     resp = auth_client.post("/api/sessions/sid-1/end")
 
@@ -494,6 +502,7 @@ def test_end_session_marks_completed(auth_client):
     row = anyio.run(get_session, "sid-1")
     assert row["status"] == "completed"
     assert row["ended_at"] is not None
+    assert len(created_tasks) == 1
 
 
 def test_pause_session_marks_paused(auth_client):

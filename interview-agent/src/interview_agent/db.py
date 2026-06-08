@@ -132,6 +132,18 @@ async def init_db() -> None:
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS user_memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                memory_type TEXT NOT NULL,
+                memory_key TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL,
+                source_session_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(id, user_id);
@@ -140,6 +152,9 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_session_memories_session ON session_memories(session_id, created_at);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_session_memories_unique_topic
                 ON session_memories(session_id, memory_type, topic);
+            CREATE INDEX IF NOT EXISTS idx_user_memories_user ON user_memories(user_id, updated_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_user_memories_unique_key
+                ON user_memories(user_id, memory_type, memory_key);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_coding_tasks_one_active
                 ON coding_tasks(session_id) WHERE status = 'active';
         """)
@@ -389,6 +404,45 @@ async def list_session_memories(session_id: str, limit: int = 6, memory_type: st
             return [dict(r) for r in rows]
     finally:
         await db.close()
+
+
+async def get_user_memory(user_id: int, memory_type: str, memory_key: str = "default") -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, user_id, memory_type, memory_key, summary, source_session_id, created_at, updated_at "
+            "FROM user_memories WHERE user_id = ? AND memory_type = ? AND memory_key = ?",
+            (user_id, memory_type, memory_key),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def upsert_user_memory(
+    user_id: int,
+    memory_type: str,
+    memory_key: str,
+    summary: str,
+    source_session_id: str = "",
+) -> dict | None:
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO user_memories "
+            "(user_id, memory_type, memory_key, summary, source_session_id, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, datetime('now')) "
+            "ON CONFLICT(user_id, memory_type, memory_key) DO UPDATE SET "
+            "summary = excluded.summary, "
+            "source_session_id = excluded.source_session_id, "
+            "updated_at = datetime('now')",
+            (user_id, memory_type, memory_key, summary, source_session_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return await get_user_memory(user_id, memory_type, memory_key)
 
 
 async def advance_session_state(
