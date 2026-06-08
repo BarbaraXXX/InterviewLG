@@ -7,6 +7,7 @@ import aiosqlite
 from langchain_core.tools import BaseTool, tool
 
 from interview_agent.db import create_coding_task as db_create_coding_task
+from interview_agent.db import set_session_state_stage
 
 _SUPPORTED_LANGUAGES = {"python", "javascript", "typescript", "java", "cpp", "go"}
 _MAX_TITLE_LEN = 120
@@ -85,6 +86,7 @@ def build_coding_task_tool(session_id: str) -> BaseTool:
                 constraints_json=json.dumps(_clean_items(constraints), ensure_ascii=False),
                 examples_json=json.dumps(_clean_examples(examples), ensure_ascii=False),
             )
+            await set_session_state_stage(session_id, "coding")
         except aiosqlite.IntegrityError:
             return json.dumps(
                 {

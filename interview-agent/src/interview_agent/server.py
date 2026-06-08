@@ -17,6 +17,7 @@ from interview_agent.auth import authenticate, get_current_user, register
 from interview_agent.config import auth_settings, llm_settings, server_settings, vectordb_settings
 from interview_agent.context import build_agent_input
 from interview_agent.db import (
+    advance_session_state,
     count_user_resumes,
     create_resume,
     delete_resume_for_user,
@@ -25,6 +26,7 @@ from interview_agent.db import (
     get_resume_for_user,
     get_session_for_user,
     get_session_messages,
+    get_session_state,
     get_user_interview_config,
     get_user_by_username,
     init_db,
@@ -808,6 +810,13 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
     display_message = req.message.strip()
     context_message = req.context_message.strip()
     await session_manager.append_message(req.session_id, "user", display_message)
+    active_coding_task = await get_active_coding_task(req.session_id)
+    await advance_session_state(
+        req.session_id,
+        ses.difficulty,
+        has_active_coding_task=active_coding_task is not None,
+        is_coding_submission=bool(context_message),
+    )
     agent_input = await build_agent_input(
         session_id=req.session_id,
         domain=ses.domain,
@@ -815,6 +824,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
         display_message=display_message,
         context_message=context_message,
         load_messages=session_manager.load_messages,
+        load_state=get_session_state,
     )
     if agent_input.rag_context:
         logger.info(

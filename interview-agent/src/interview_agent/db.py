@@ -105,6 +105,19 @@ async def init_db() -> None:
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS session_states (
+                session_id TEXT PRIMARY KEY,
+                target TEXT NOT NULL DEFAULT 'campus_fulltime',
+                stage TEXT NOT NULL DEFAULT 'opening',
+                stage_round INTEGER NOT NULL DEFAULT 0,
+                total_round INTEGER NOT NULL DEFAULT 0,
+                covered_topics TEXT NOT NULL DEFAULT '[]',
+                pending_focus TEXT NOT NULL DEFAULT '',
+                last_user_quality TEXT NOT NULL DEFAULT '',
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(id, user_id);
@@ -204,10 +217,102 @@ async def create_session(
                 resume_title_snapshot,
             ),
         )
+        await db.execute(
+            "INSERT INTO session_states (session_id, target) VALUES (?, ?)",
+            (session_id, difficulty),
+        )
         await db.commit()
         logger.info("session created id=%s user=%s", session_id, username)
     finally:
         await db.close()
+
+
+async def get_session_state(session_id: str) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT session_id, target, stage, stage_round, total_round, covered_topics, "
+            "pending_focus, last_user_quality, updated_at FROM session_states WHERE session_id = ?",
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def ensure_session_state(session_id: str, target: str = "campus_fulltime") -> dict:
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO session_states (session_id, target) VALUES (?, ?)",
+            (session_id, target),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    row = await get_session_state(session_id)
+    if row is None:
+        raise RuntimeError("Session state was not persisted")
+    return row
+
+
+async def set_session_state_stage(session_id: str, stage: str) -> dict | None:
+    row = await get_session_state(session_id)
+    if row is None:
+        return None
+    if row["stage"] == stage:
+        return row
+
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE session_states SET stage = ?, stage_round = 0, updated_at = datetime('now') WHERE session_id = ?",
+            (stage, session_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return await get_session_state(session_id)
+
+
+async def advance_session_state(
+    session_id: str,
+    target: str,
+    *,
+    has_active_coding_task: bool = False,
+    is_coding_submission: bool = False,
+) -> dict:
+    row = await ensure_session_state(session_id, target)
+    old_stage = row["stage"]
+    total_round = int(row["total_round"]) + 1
+
+    stage = old_stage
+    if has_active_coding_task or (old_stage == "coding" and is_coding_submission):
+        stage = "coding"
+    elif old_stage == "coding":
+        stage = "technical"
+    elif old_stage == "opening" and total_round >= 1:
+        stage = "project"
+
+    stage_round = 1 if stage != old_stage else int(row["stage_round"]) + 1
+
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE session_states SET target = ?, stage = ?, stage_round = ?, total_round = ?, "
+            "updated_at = datetime('now') WHERE session_id = ?",
+            (target, stage, stage_round, total_round, session_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    updated = await get_session_state(session_id)
+    if updated is None:
+        raise RuntimeError("Session state was not persisted")
+    return updated
 
 
 async def get_session(session_id: str) -> dict | None:

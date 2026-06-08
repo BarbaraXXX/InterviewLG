@@ -18,6 +18,18 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
         assert "已提交代码题" not in query
         return [{"topic": "链表", "question": "如何反转链表？", "followups": ["递归怎么做？"]}]
 
+    async def fake_load_state(session_id):
+        assert session_id == "sid-1"
+        return {
+            "target": "campus_fulltime",
+            "stage": "coding",
+            "stage_round": 1,
+            "total_round": 3,
+            "covered_topics": "[]",
+            "pending_focus": "",
+            "last_user_quality": "",
+        }
+
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
 
     agent_input = await context_module.build_agent_input(
@@ -27,6 +39,7 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
         display_message="已提交代码题：反转链表",
         context_message="完整代码上下文",
         load_messages=fake_load_messages,
+        load_state=fake_load_state,
     )
 
     assert [type(message) for message in agent_input.messages] == [
@@ -34,6 +47,8 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
         AIMessage,
         HumanMessage,
         SystemMessage,
+        SystemMessage,
     ]
-    assert agent_input.messages[-2].content == "完整代码上下文"
+    assert agent_input.messages[-3].content == "完整代码上下文"
+    assert "当前面试状态" in agent_input.messages[-2].content
     assert "真实面试题参考" in agent_input.messages[-1].content
