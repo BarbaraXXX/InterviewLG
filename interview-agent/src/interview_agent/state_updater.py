@@ -11,6 +11,7 @@ from langchain_openai import ChatOpenAI
 
 from interview_agent.config import llm_settings
 from interview_agent.db import get_session_state, update_session_state_control
+from interview_agent.memory import summarize_completed_topic
 
 logger = logging.getLogger(__name__)
 
@@ -222,4 +223,13 @@ async def record_turn_state(
             updated.get("topic_status"),
             updated.get("last_user_quality"),
         )
+    if covered_topic := update.get("covered_topic"):
+        try:
+            await summarize_completed_topic(
+                session_id=session_id,
+                covered_topic=covered_topic,
+                provider_name=provider_name,
+            )
+        except Exception:
+            logger.warning("session memory summary failed session=%s", session_id, exc_info=True)
     return updated

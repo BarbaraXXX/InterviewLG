@@ -32,6 +32,10 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
             "last_user_quality": "partial",
         }
 
+    async def fake_load_memory_context(session_id):
+        assert session_id == "sid-1"
+        return "本场面试长期记忆摘要：\n- Redis：缓存穿透掌握较好"
+
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
 
     agent_input = await context_module.build_agent_input(
@@ -42,6 +46,7 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
         context_message="完整代码上下文",
         load_messages=fake_load_messages,
         load_state=fake_load_state,
+        load_memory_context=fake_load_memory_context,
     )
 
     assert [type(message) for message in agent_input.messages] == [
@@ -51,9 +56,12 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
         SystemMessage,
         SystemMessage,
         SystemMessage,
+        SystemMessage,
     ]
-    assert agent_input.messages[-4].content == "完整代码上下文"
-    assert "当前面试状态" in agent_input.messages[-3].content
+    assert agent_input.messages[-5].content == "完整代码上下文"
+    assert "当前面试状态" in agent_input.messages[-4].content
+    assert "本场面试长期记忆摘要" in agent_input.messages[-3].content
     assert "本轮流程控制" in agent_input.messages[-2].content
     assert "真实面试题参考" in agent_input.messages[-1].content
+    assert "缓存穿透掌握较好" in agent_input.memory_context
     assert "边界条件" in agent_input.stage_control_context

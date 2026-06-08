@@ -40,6 +40,7 @@ from interview_agent.db import (
     upsert_user_interview_config,
 )
 from interview_agent.logging_config import setup_logging
+from interview_agent.memory import load_memory_context
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS
 from interview_agent.session import session_manager
@@ -827,6 +828,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
         context_message=context_message,
         load_messages=session_manager.load_messages,
         load_state=get_session_state,
+        load_memory_context=load_memory_context,
     )
     if agent_input.rag_context:
         logger.info(

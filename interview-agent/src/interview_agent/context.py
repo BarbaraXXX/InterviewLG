@@ -14,6 +14,7 @@ from interview_agent.stage_controller import format_stage_control_context
 
 LoadMessages = Callable[[str], Awaitable[list[BaseMessage]]]
 LoadState = Callable[[str], Awaitable[dict | None]]
+LoadMemoryContext = Callable[[str], Awaitable[str]]
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class AgentInput:
     rag_cards: list[dict]
     rag_context: str
     state_context: str
+    memory_context: str
     stage_control_context: str
 
 
@@ -34,6 +36,7 @@ async def build_agent_input(
     context_message: str,
     load_messages: LoadMessages,
     load_state: LoadState | None = None,
+    load_memory_context: LoadMemoryContext | None = None,
 ) -> AgentInput:
     """Build the message list sent into the agent graph for a single turn.
 
@@ -48,12 +51,17 @@ async def build_agent_input(
         run_messages = [*run_messages[:-1], HumanMessage(content=context_message)]
 
     state_context = ""
+    memory_context = ""
     stage_control_context = ""
     if load_state is not None:
         state = await load_state(session_id)
         state_context = format_state_context(state)
         if state_context:
             run_messages = [*run_messages, SystemMessage(content=state_context)]
+        if load_memory_context is not None:
+            memory_context = await load_memory_context(session_id)
+            if memory_context:
+                run_messages = [*run_messages, SystemMessage(content=memory_context)]
         stage_control_context = format_stage_control_context(state)
         if stage_control_context:
             run_messages = [*run_messages, SystemMessage(content=stage_control_context)]
@@ -69,5 +77,6 @@ async def build_agent_input(
         rag_cards=rag_cards,
         rag_context=rag_context,
         state_context=state_context,
+        memory_context=memory_context,
         stage_control_context=stage_control_context,
     )

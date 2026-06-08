@@ -121,11 +121,25 @@ async def init_db() -> None:
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS session_memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                memory_type TEXT NOT NULL,
+                topic TEXT NOT NULL DEFAULT '',
+                summary TEXT NOT NULL,
+                evidence_message_ids TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(id, user_id);
             CREATE INDEX IF NOT EXISTS idx_resumes_user ON resumes(user_id, updated_at);
             CREATE INDEX IF NOT EXISTS idx_coding_tasks_session ON coding_tasks(session_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_session_memories_session ON session_memories(session_id, created_at);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_session_memories_unique_topic
+                ON session_memories(session_id, memory_type, topic);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_coding_tasks_one_active
                 ON coding_tasks(session_id) WHERE status = 'active';
         """)
@@ -326,6 +340,55 @@ async def update_session_state_control(
         await db.close()
 
     return await get_session_state(session_id)
+
+
+async def get_session_memory(session_id: str, memory_type: str, topic: str) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, session_id, memory_type, topic, summary, evidence_message_ids, created_at "
+            "FROM session_memories WHERE session_id = ? AND memory_type = ? AND topic = ?",
+            (session_id, memory_type, topic),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def create_session_memory(
+    session_id: str,
+    memory_type: str,
+    topic: str,
+    summary: str,
+    evidence_message_ids: str = "[]",
+) -> dict | None:
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT OR IGNORE INTO session_memories "
+            "(session_id, memory_type, topic, summary, evidence_message_ids) VALUES (?, ?, ?, ?, ?)",
+            (session_id, memory_type, topic, summary, evidence_message_ids),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return await get_session_memory(session_id, memory_type, topic)
+
+
+async def list_session_memories(session_id: str, limit: int = 6, memory_type: str = "topic_summary") -> list[dict]:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, session_id, memory_type, topic, summary, evidence_message_ids, created_at "
+            "FROM session_memories WHERE session_id = ? AND memory_type = ? "
+            "ORDER BY datetime(created_at) DESC, id DESC LIMIT ?",
+            (session_id, memory_type, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+    finally:
+        await db.close()
 
 
 async def advance_session_state(
@@ -827,12 +890,26 @@ async def get_session_messages(session_id: str, limit: int = _MAX_MESSAGES_PER_S
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT role, content, seq, created_at FROM messages WHERE session_id = ? "
+            "SELECT id, role, content, seq, created_at FROM messages WHERE session_id = ? "
             "ORDER BY seq ASC LIMIT ?",
             (session_id, limit),
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
+    finally:
+        await db.close()
+
+
+async def get_recent_session_messages(session_id: str, limit: int = 12) -> list[dict]:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, role, content, seq, created_at FROM messages WHERE session_id = ? "
+            "ORDER BY seq DESC LIMIT ?",
+            (session_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in reversed(rows)]
     finally:
         await db.close()
 
