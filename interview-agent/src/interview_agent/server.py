@@ -8,7 +8,6 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -16,6 +15,7 @@ from slowapi.util import get_remote_address
 
 from interview_agent.auth import authenticate, get_current_user, register
 from interview_agent.config import auth_settings, llm_settings, server_settings, vectordb_settings
+from interview_agent.context import build_agent_input
 from interview_agent.db import (
     count_user_resumes,
     create_resume,
@@ -39,7 +39,6 @@ from interview_agent.db import (
 from interview_agent.logging_config import setup_logging
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS
-from interview_agent.rag import build_rag_query, format_rag_context, search_interview_cards
 from interview_agent.session import session_manager
 
 logger = logging.getLogger(__name__)
@@ -803,22 +802,26 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
     display_message = req.message.strip()
     context_message = req.context_message.strip()
     await session_manager.append_message(req.session_id, "user", display_message)
-    messages = await session_manager.load_messages(req.session_id)
-    run_messages = messages
-    if context_message and run_messages:
-        run_messages = [*run_messages[:-1], HumanMessage(content=context_message)]
-
-    rag_query = build_rag_query(ses.domain, ses.difficulty, context_message or display_message, run_messages)
-    rag_cards = await search_interview_cards(rag_query, ses.domain)
-    rag_context = format_rag_context(rag_cards)
-    if rag_context:
-        run_messages = [*run_messages, SystemMessage(content=rag_context)]
-        logger.info("rag context injected session=%s cards=%d chars=%d", req.session_id, len(rag_cards), len(rag_context))
+    agent_input = await build_agent_input(
+        session_id=req.session_id,
+        domain=ses.domain,
+        difficulty=ses.difficulty,
+        display_message=display_message,
+        context_message=context_message,
+        load_messages=session_manager.load_messages,
+    )
+    if agent_input.rag_context:
+        logger.info(
+            "rag context injected session=%s cards=%d chars=%d",
+            req.session_id,
+            len(agent_input.rag_cards),
+            len(agent_input.rag_context),
+        )
 
     async def event_generator():
         full_content = ""
         async for event in ses.agent.astream_events(
-            {"messages": run_messages},
+            {"messages": agent_input.messages},
             version="v2",
         ):
             kind = event.get("event")

@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from interview_agent import context as context_module
 from interview_agent import server as server_module
 from interview_agent.auth import get_current_user
 from interview_agent.db import (
@@ -713,7 +714,7 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
 
     monkeypatch.setattr(server_module, "session_manager", fake_manager)
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
-    monkeypatch.setattr(server_module, "search_interview_cards", fake_search)
+    monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
 
     with auth_client.stream("POST", "/api/chat/stream", json={"session_id": "sid", "message": "继续问 Redis"}) as resp:
         body = "".join(resp.iter_text())
@@ -739,7 +740,7 @@ def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):
 
     monkeypatch.setattr(server_module, "session_manager", fake_manager)
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
-    monkeypatch.setattr(server_module, "search_interview_cards", fake_search)
+    monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
 
     with auth_client.stream(
         "POST",
