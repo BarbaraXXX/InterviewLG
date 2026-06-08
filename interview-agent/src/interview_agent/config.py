@@ -139,13 +139,13 @@ class ContextSettings(BaseSettings):
         extra="ignore",
     )
 
-    window_tokens: int = 32768
-    output_reserve_tokens: int = 4096
-    input_budget_tokens: int = 24000
+    window_tokens: int = 262144
+    output_reserve_tokens: int = 16384
+    input_budget_tokens: int = 196608
     tokenizer_encoding: str = "cl100k_base"
-    recent_messages_trigger_tokens: int = 8000
-    recent_messages_keep_tokens: int = 5000
-    running_summary_max_tokens: int = 2500
+    recent_messages_trigger_tokens: int = 96000
+    recent_messages_keep_tokens: int = 64000
+    running_summary_max_tokens: int = 12000
 
     @field_validator("window_tokens")
     @classmethod
@@ -155,7 +155,7 @@ class ContextSettings(BaseSettings):
     @field_validator("output_reserve_tokens")
     @classmethod
     def _validate_reserve(cls, value: int) -> int:
-        return min(max(value, 512), 32768)
+        return min(max(value, 512), 65536)
 
     @field_validator("input_budget_tokens")
     @classmethod
@@ -165,12 +165,12 @@ class ContextSettings(BaseSettings):
     @field_validator("recent_messages_trigger_tokens")
     @classmethod
     def _validate_recent_trigger(cls, value: int) -> int:
-        return min(max(value, 1024), 131072)
+        return min(max(value, 1024), 262144)
 
     @field_validator("recent_messages_keep_tokens")
     @classmethod
     def _validate_recent_keep(cls, value: int) -> int:
-        return min(max(value, 512), 131072)
+        return min(max(value, 512), 262144)
 
     @field_validator("running_summary_max_tokens")
     @classmethod

@@ -10,6 +10,25 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    date: '2026-06-08',
+    title: '上下文记忆与长上下文预算',
+    items: [
+      '面试页新增上下文 token 占用统计，可查看当前会话输入预算使用情况。',
+      '新增单场面试滚动摘要，长面试会自动压缩较早对话，同时保留最近原文上下文。',
+      '上下文预算统一调整为 256K 档，减少过早压缩，并兼顾成本、延迟和模型注意力稳定性。',
+    ],
+    sections: [
+      {
+        title: '压缩规则',
+        items: [
+          '默认模型窗口为 256K tokens，实际输入预算约 192K tokens。',
+          '未摘要历史超过约 96K tokens 后触发滚动摘要。',
+          '压缩后仍保留最近约 64K tokens 原始对话，历史记录回看不受影响。',
+        ],
+      },
+    ],
+  },
+  {
     date: '2026-06-05',
     title: '手撕代码平台',
     items: [

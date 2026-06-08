@@ -2,6 +2,7 @@ import json
 
 from interview_agent.config import (
     AuthSettings,
+    ContextSettings,
     LLMSettings,
     MCPSettings,
     ServerSettings,
@@ -108,6 +109,39 @@ def test_server_settings_from_env(monkeypatch):
     s = ServerSettings(_env_file=None)
     assert s.host == "127.0.0.1"
     assert s.port == 8001
+
+
+def test_context_settings_default_uses_256k_budget(monkeypatch):
+    for key in (
+        "CONTEXT_WINDOW_TOKENS",
+        "CONTEXT_OUTPUT_RESERVE_TOKENS",
+        "CONTEXT_INPUT_BUDGET_TOKENS",
+        "CONTEXT_RECENT_MESSAGES_TRIGGER_TOKENS",
+        "CONTEXT_RECENT_MESSAGES_KEEP_TOKENS",
+        "CONTEXT_RUNNING_SUMMARY_MAX_TOKENS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    s = ContextSettings(_env_file=None)
+    assert s.window_tokens == 262144
+    assert s.output_reserve_tokens == 16384
+    assert s.input_budget_tokens == 196608
+    assert s.recent_messages_trigger_tokens == 96000
+    assert s.recent_messages_keep_tokens == 64000
+    assert s.running_summary_max_tokens == 12000
+
+
+def test_context_settings_clamps_to_256k_ceiling(monkeypatch):
+    monkeypatch.setenv("CONTEXT_WINDOW_TOKENS", "1048576")
+    monkeypatch.setenv("CONTEXT_INPUT_BUDGET_TOKENS", "1048576")
+    monkeypatch.setenv("CONTEXT_RECENT_MESSAGES_TRIGGER_TOKENS", "1048576")
+    monkeypatch.setenv("CONTEXT_RECENT_MESSAGES_KEEP_TOKENS", "1048576")
+
+    s = ContextSettings(_env_file=None)
+    assert s.window_tokens == 262144
+    assert s.input_budget_tokens == 262144
+    assert s.recent_messages_trigger_tokens == 262144
+    assert s.recent_messages_keep_tokens == 262144
 
 
 def test_mcp_settings_default(monkeypatch):
