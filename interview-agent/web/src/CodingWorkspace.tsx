@@ -32,8 +32,14 @@ export default function CodingWorkspace({
   theme: ThemeMode;
   onSubmit: (task: CodingTask, language: string, code: string) => Promise<void>;
 }) {
-  const initialLanguage = task.submitted_language || task.draft_language || task.language || 'python';
-  const initialCode = task.submitted_code || task.draft_code || task.starter_code || '';
+  const isSubmitted = task.status === 'submitted';
+  const isRevision = !isSubmitted && task.revision_count > 0;
+  const initialLanguage = isSubmitted
+    ? task.submitted_language || task.draft_language || task.language || 'python'
+    : task.draft_language || task.submitted_language || task.language || 'python';
+  const initialCode = isSubmitted
+    ? task.submitted_code || task.draft_code || task.starter_code || ''
+    : task.draft_code || task.submitted_code || task.starter_code || '';
   const [language, setLanguage] = useState(initialLanguage);
   const [code, setCode] = useState(initialCode);
   const [submitting, setSubmitting] = useState(false);
@@ -41,7 +47,6 @@ export default function CodingWorkspace({
   const [draftStatus, setDraftStatus] = useState(task.draft_code ? '已恢复草稿' : '');
   const [error, setError] = useState('');
   const [savedDraftKey, setSavedDraftKey] = useState(`${initialLanguage}\n${initialCode}`);
-  const isSubmitted = task.status === 'submitted';
   const draftKey = useMemo(() => `${language}\n${code}`, [code, language]);
 
   const saveDraft = useCallback(async (silent = false) => {
@@ -91,7 +96,7 @@ export default function CodingWorkspace({
           <h2>{task.title}</h2>
         </div>
         <span className={`coding-status ${isSubmitted ? 'submitted' : 'active'}`}>
-          {isSubmitted ? '已提交' : '进行中'}
+          {isSubmitted ? '已提交' : isRevision ? '修订中' : '进行中'}
         </span>
       </div>
 
@@ -99,6 +104,12 @@ export default function CodingWorkspace({
         <section className="coding-problem">
           <h3>题目描述</h3>
           <MarkdownMessage content={task.description} />
+          {isRevision && task.revision_instruction && (
+            <div className="coding-revision-note">
+              <strong>修订要求</strong>
+              <MarkdownMessage content={task.revision_instruction} />
+            </div>
+          )}
           {task.constraints.length > 0 && (
             <div>
               <h3>约束</h3>

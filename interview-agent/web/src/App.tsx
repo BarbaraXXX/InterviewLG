@@ -52,6 +52,9 @@ const AUTH_SESSION_KEY = 'interviewlg_active_session';
 const HISTORY_NOTICE_DISMISSED_KEY = 'interviewlg_history_notice_dismissed';
 const THEME_STORAGE_KEY = 'interviewlg_theme';
 const HISTORY_WARNING_THRESHOLD = 45;
+const INTERVIEW_END_PHRASE = '本次面试到此结束';
+const AUTO_END_DELAY_MS = 10000;
+const AUTO_END_NOTICE_MS = 5000;
 
 function getInitialTheme(): ThemeMode {
   try {
@@ -1970,8 +1973,12 @@ function ChatView({
   const [isComposing, setIsComposing] = useState(false);
   const [codingTask, setCodingTask] = useState<CodingTask | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
+  const [autoEndNotice, setAutoEndNotice] = useState('');
+  const [autoEnded, setAutoEnded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const autoEndTimerRef = useRef<number | null>(null);
+  const noticeTimerRef = useRef<number | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1994,22 +2001,56 @@ function ChatView({
     void refreshContextUsage();
   }, [refreshContextUsage]);
 
+  useEffect(() => () => {
+    if (autoEndTimerRef.current !== null) {
+      window.clearTimeout(autoEndTimerRef.current);
+    }
+    if (noticeTimerRef.current !== null) {
+      window.clearTimeout(noticeTimerRef.current);
+    }
+  }, []);
+
   const refreshCodingTask = useCallback(async () => {
     try {
       const task = await fetchActiveCodingTask(sessionId);
-      if (task) {
-        setCodingTask(task);
-      }
+      setCodingTask(task);
     } catch {
       // Keep chat usable even if the coding workspace cannot refresh.
     }
   }, [sessionId]);
 
+  const showAutoEndNotice = useCallback((message: string) => {
+    setAutoEndNotice(message);
+    if (noticeTimerRef.current !== null) {
+      window.clearTimeout(noticeTimerRef.current);
+    }
+    noticeTimerRef.current = window.setTimeout(() => {
+      setAutoEndNotice('');
+      noticeTimerRef.current = null;
+    }, AUTO_END_NOTICE_MS);
+  }, []);
+
+  const scheduleAutoEnd = useCallback((reply: string) => {
+    if (!reply.includes(INTERVIEW_END_PHRASE) || autoEnded || autoEndTimerRef.current !== null) return;
+    autoEndTimerRef.current = window.setTimeout(() => {
+      autoEndTimerRef.current = null;
+      void endInterviewSession(sessionId)
+        .then(() => {
+          setAutoEnded(true);
+          showAutoEndNotice('本次面试已自动结束并保存，可继续查看反馈。');
+          void refreshContextUsage();
+        })
+        .catch(() => {
+          showAutoEndNotice('自动结束保存失败，请手动点击“结束面试”。');
+        });
+    }, AUTO_END_DELAY_MS);
+  }, [autoEnded, refreshContextUsage, sessionId, showAutoEndNotice]);
+
   useEffect(() => {
     let ignore = false;
     fetchActiveCodingTask(sessionId)
       .then((task) => {
-        if (!ignore && task) {
+        if (!ignore) {
           setCodingTask(task);
         }
       })
@@ -2021,10 +2062,11 @@ function ChatView({
 
   const startAgentStream = useCallback((displayMessage: string, contextMessage: string = '') => {
     const text = displayMessage.trim();
-    if (!text || isStreaming) return;
+    if (!text || isStreaming || autoEnded) return;
 
     setInput('');
     let aiMsgIndex = 0;
+    let aiContent = '';
     setMessages((prev) => {
       aiMsgIndex = prev.length + 1;
       return [...prev, { role: 'user', content: text }, { role: 'ai', content: '', streaming: true }];
@@ -2035,6 +2077,7 @@ function ChatView({
       sessionId,
       text,
       (token) => {
+        aiContent += token;
         setMessages((prev) =>
           prev.map((m, i) =>
             i === aiMsgIndex ? { ...m, content: m.content + token } : m,
@@ -2050,11 +2093,12 @@ function ChatView({
         setIsStreaming(false);
         void refreshCodingTask();
         void refreshContextUsage();
+        scheduleAutoEnd(aiContent);
       },
       contextMessage,
     );
     abortRef.current = controller;
-  }, [isStreaming, refreshCodingTask, refreshContextUsage, sessionId]);
+  }, [autoEnded, isStreaming, refreshCodingTask, refreshContextUsage, scheduleAutoEnd, sessionId]);
 
   const handleSend = () => {
     startAgentStream(input);
@@ -2062,7 +2106,7 @@ function ChatView({
 
   const handleCodingSubmit = async (task: CodingTask, language: string, code: string) => {
     const result = await submitCodingTask(task.id, language, code);
-    setCodingTask(result.task);
+    setCodingTask(null);
     const languageLabel = CODING_LANGUAGE_LABELS[language] || language;
     startAgentStream(`已提交代码题：${task.title}（${languageLabel}）`, result.contextMessage);
   };
@@ -2079,11 +2123,19 @@ function ChatView({
   };
 
   const handleEnd = () => {
+    if (autoEndTimerRef.current !== null) {
+      window.clearTimeout(autoEndTimerRef.current);
+      autoEndTimerRef.current = null;
+    }
     abortRef.current?.abort();
     void onEnd();
   };
 
   const handlePause = () => {
+    if (autoEndTimerRef.current !== null) {
+      window.clearTimeout(autoEndTimerRef.current);
+      autoEndTimerRef.current = null;
+    }
     abortRef.current?.abort();
     void onPause();
   };
@@ -2113,10 +2165,11 @@ function ChatView({
 
       <div className="chat-body">
         <section className="chat-panel" aria-label="面试对话">
+          {autoEndNotice && <div className="chat-toast" role="status">{autoEndNotice}</div>}
           <div className="chat-messages">
             {messages.length === 0 && (
               <div className="chat-empty">
-                <p>面试即将开始，请先自我介绍吧</p>
+                <p>面试官正在准备开场，请稍候。</p>
               </div>
             )}
             {messages.map((msg, i) => (
@@ -2150,13 +2203,13 @@ function ChatView({
               onKeyDown={handleKeyDown}
               placeholder="输入你的回答..."
               rows={1}
-              disabled={isStreaming}
+              disabled={isStreaming || autoEnded}
             />
             <button
               aria-label="发送回答"
               className="send-button"
               onClick={handleSend}
-              disabled={!input.trim() || isStreaming}
+              disabled={!input.trim() || isStreaming || autoEnded}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="22" y1="2" x2="11" y2="13" />
@@ -2270,11 +2323,11 @@ function App() {
     resumeId: number | null,
   ) => {
     try {
-      const sid = await createSession(d, diff, jd, profileCompany, profilePosition, resumeId);
-      setSessionId(sid);
+      const created = await createSession(d, diff, jd, profileCompany, profilePosition, resumeId);
+      setSessionId(created.sessionId);
       setDomain(d);
       setDifficulty(diff);
-      setChatMessages([]);
+      setChatMessages(toChatMessages(created.messages));
       setView('chat');
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {

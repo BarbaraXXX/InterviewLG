@@ -14,7 +14,7 @@ from interview_agent.db import (
     init_db,
     list_user_sessions,
 )
-from interview_agent.session import SessionManager
+from interview_agent.session import OPENING_MESSAGE, SessionManager
 
 
 @pytest.fixture
@@ -43,6 +43,10 @@ async def test_session_manager_create(mock_agent_build, isolate_env):
     row = await get_session(sid)
     assert row is not None
     assert row["username"] == "alice"
+    messages = await get_session_messages(sid)
+    assert len(messages) == 1
+    assert messages[0]["role"] == "ai"
+    assert messages[0]["content"] == OPENING_MESSAGE
 
 
 async def test_session_manager_get_agent(mock_agent_build, isolate_env):
@@ -188,8 +192,8 @@ async def test_append_message_uses_monotonic_seq_after_trim(mock_agent_build, is
     rows = await get_session_messages(sid, 500)
     assert len(rows) == 200
     assert rows[0]["content"] == "m5"
-    assert rows[-1]["seq"] == 204
-    assert await get_next_message_seq(sid) == 205
+    assert rows[-1]["seq"] == 205
+    assert await get_next_message_seq(sid) == 206
 
 
 async def test_expire_stale_sessions_keeps_history(isolate_env):

@@ -8,7 +8,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from interview_agent.config import LLMProviderConfig, llm_settings
-from interview_agent.coding_tools import build_coding_task_tool
+from interview_agent.coding_tools import build_coding_tools
 from interview_agent.mcp_client import get_mcp_tools
 from interview_agent.prompts import build_system_prompt
 
@@ -51,7 +51,7 @@ async def build_interview_agent(
     logger.info("building agent provider=%s model=%s api_key=%s domain=%s difficulty=%s", provider_name or llm_settings.default_provider, provider.model, masked_key, domain, difficulty)
     tools = await get_mcp_tools()
     if session_id:
-        tools = [*tools, build_coding_task_tool(session_id)]
+        tools = [*tools, *build_coding_tools(session_id)]
     llm = _create_llm(tools, provider)
     system_prompt = build_system_prompt(domain, difficulty, structured_jd, structured_profile)
 

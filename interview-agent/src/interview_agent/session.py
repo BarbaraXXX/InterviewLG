@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 
 _MAX_AGENTS = 100
 _MAX_MESSAGES_PER_SESSION = 200
+OPENING_MESSAGE = (
+    "你好，我是本场模拟面试官。请先做一个简短的自我介绍，"
+    "可以包括你的技术方向、项目经历，以及希望本次重点考查的内容。"
+)
 
 
 class InterviewSession:
@@ -71,6 +75,7 @@ class SessionManager:
             structured_profile=structured_profile,
             resume_title_snapshot=resume_title_snapshot,
         )
+        await create_message(session_id, "ai", OPENING_MESSAGE, 0)
 
         self._agents[session_id] = InterviewSession(agent, domain, difficulty, username)
         trimmed_ids = await trim_user_sessions(user_id)

@@ -16,6 +16,7 @@ from interview_agent.db import (
     create_user,
     get_session,
     init_db,
+    request_latest_coding_task_revision,
     update_session_status,
 )
 from interview_agent.jd_parser import StructuredJD
@@ -464,6 +465,26 @@ def test_coding_task_active_and_submit(auth_client):
     active_after_submit = auth_client.get("/api/sessions/sid-code/coding-task/active")
     assert active_after_submit.status_code == 200
     assert active_after_submit.json()["task"] is None
+
+    revised = anyio.run(request_latest_coding_task_revision, "sid-code", "请补充边界条件处理。")
+    assert revised is not None
+    assert revised["id"] == "task-1"
+    assert revised["status"] == "active"
+    assert revised["draft_code"].endswith("return [0, 1]")
+    assert revised["revision_count"] == 1
+
+    active_after_revision = auth_client.get("/api/sessions/sid-code/coding-task/active")
+    assert active_after_revision.status_code == 200
+    revision_task = active_after_revision.json()["task"]
+    assert revision_task["revision_instruction"] == "请补充边界条件处理。"
+    assert revision_task["draft_code"].endswith("return [0, 1]")
+
+    resubmitted = auth_client.post(
+        "/api/coding-tasks/task-1/submit",
+        json={"language": "python", "code": "class Solution:\n    def twoSum(self, nums, target):\n        return []"},
+    )
+    assert resubmitted.status_code == 200
+    assert resubmitted.json()["task"]["status"] == "submitted"
 
 
 def test_coding_task_rejects_other_user(auth_client):

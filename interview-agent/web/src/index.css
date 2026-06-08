@@ -2236,6 +2236,7 @@ body {
 .chat-panel {
   min-width: 0;
   min-height: 0;
+  position: relative;
   display: flex;
   flex-direction: column;
 }
@@ -2466,6 +2467,22 @@ body {
   border: 1px solid var(--color-accent-border);
 }
 
+.coding-revision-note {
+  padding: var(--space-3);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  background: var(--color-accent-dim);
+}
+
+.coding-revision-note strong {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--color-accent);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .coding-task-body,
 .coding-problem,
 .coding-editor-panel {
@@ -2592,6 +2609,24 @@ body {
   font-size: 0.9375rem;
   color: var(--color-text-tertiary);
   font-style: italic;
+}
+
+.chat-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 86px;
+  z-index: 5;
+  transform: translateX(-50%);
+  max-width: min(520px, calc(100% - 48px));
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  color: var(--color-accent);
+  font-size: 0.875rem;
+  font-weight: 800;
+  text-align: center;
+  box-shadow: var(--shadow-md);
 }
 
 .message-row {

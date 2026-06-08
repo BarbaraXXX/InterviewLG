@@ -412,6 +412,8 @@ def _serialize_coding_task(task: dict | None) -> dict | None:
         "draft_code": task["draft_code"],
         "submitted_language": task["submitted_language"],
         "submitted_code": task["submitted_code"],
+        "revision_instruction": task["revision_instruction"],
+        "revision_count": task["revision_count"],
         "status": task["status"],
         "created_at": task["created_at"],
         "submitted_at": task["submitted_at"],
@@ -454,6 +456,11 @@ def _build_code_submission_context(task: dict, language: str, code: str) -> str:
     parts.append(
         "请作为技术面试官评价这份代码的思路、复杂度、边界条件和代码质量，"
         "然后根据表现继续追问或进入下一环节。"
+        "只有当这份代码完成度很低、核心算法方向错误、代码基本无法表达解题思路，"
+        "或关键数据结构/边界完全缺失，必须让候选人重新组织代码实现时，才调用 request_coding_revision，"
+        "并在 revision_instruction 中写清具体修订要求。"
+        "如果整体思路可接受，只是小语法问题、命名问题、个别边界遗漏或复杂度表述不完整，"
+        "请口头指出不足并结束手撕部分，继续追问或进入总结，不要调用 request_coding_revision。"
     )
     return "\n\n".join(parts)
 
@@ -653,7 +660,8 @@ async def create_session(
         "create_session user=%s session=%s domain=%s difficulty=%s jd_len=%d profile_len=%d",
         username, session_id, req.domain, req.difficulty, len(structured_jd), len(structured_profile),
     )
-    return {"session_id": session_id}
+    messages = await get_session_messages(session_id)
+    return {"session_id": session_id, "messages": messages}
 
 
 async def _get_current_user_row(username: str) -> dict:

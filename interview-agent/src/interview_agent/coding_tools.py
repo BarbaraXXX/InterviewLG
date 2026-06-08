@@ -7,6 +7,7 @@ import aiosqlite
 from langchain_core.tools import BaseTool, tool
 
 from interview_agent.db import create_coding_task as db_create_coding_task
+from interview_agent.db import request_latest_coding_task_revision
 from interview_agent.db import set_session_state_stage
 
 _SUPPORTED_LANGUAGES = {"python", "javascript", "typescript", "java", "cpp", "go"}
@@ -50,7 +51,7 @@ def _clean_examples(examples: list[dict] | None) -> list[dict]:
     return cleaned
 
 
-def build_coding_task_tool(session_id: str) -> BaseTool:
+def build_coding_tools(session_id: str) -> list[BaseTool]:
     @tool
     async def create_coding_task(
         title: str,
@@ -105,4 +106,42 @@ def build_coding_task_tool(session_id: str) -> BaseTool:
             ensure_ascii=False,
         )
 
-    return create_coding_task
+    @tool
+    async def request_coding_revision(revision_instruction: str = "") -> str:
+        """重新打开最近一次已提交的手撕代码题，让候选人在上一版代码基础上修改并再次提交。
+
+        只有当候选人代码完成度很低、核心算法方向错误、代码基本无法表达解题思路，
+        或关键数据结构/边界完全缺失，必须让候选人在代码层面重新组织实现时才调用。
+        如果整体思路可接受，只是有小语法问题、命名问题、个别边界遗漏、复杂度表述不完整，
+        或你只是想指出代码问题、给出优化建议、口头追问复杂度或进入下一环节，不要调用。
+        revision_instruction 应写清本次需要修改的具体点，例如补充空输入边界、修正递归终止条件、优化复杂度。
+        调用后平台会重新打开同一道题，并把候选人上一版提交代码作为可编辑草稿。
+        """
+
+        task = await request_latest_coding_task_revision(
+            session_id,
+            revision_instruction.strip()[:_MAX_ITEM_LEN],
+        )
+        if task is None:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "没有可修订的已提交代码题，或当前已有一道未提交的手撕题。",
+                },
+                ensure_ascii=False,
+            )
+        await set_session_state_stage(session_id, "coding")
+        return json.dumps(
+            {
+                "ok": True,
+                "task_id": task["id"],
+                "message": "代码题已重新打开，候选人可以在上一版代码基础上修改后再次提交。",
+            },
+            ensure_ascii=False,
+        )
+
+    return [create_coding_task, request_coding_revision]
+
+
+def build_coding_task_tool(session_id: str) -> BaseTool:
+    return build_coding_tools(session_id)[0]

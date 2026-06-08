@@ -62,6 +62,8 @@ export interface CodingTask {
   draft_code: string | null;
   submitted_language: string | null;
   submitted_code: string | null;
+  revision_instruction: string;
+  revision_count: number;
   status: 'active' | 'submitted';
   created_at: string;
   submitted_at: string | null;
@@ -239,7 +241,7 @@ export async function createSession(
   profileCompany: string = '',
   profilePosition: string = '',
   resumeId: number | null = null,
-): Promise<string> {
+): Promise<{ sessionId: string; messages: InterviewMessage[] }> {
   const res = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
     headers: authHeaders(),
@@ -257,7 +259,10 @@ export async function createSession(
     throw new Error('UNAUTHORIZED');
   }
   const data = await res.json();
-  return data.session_id;
+  return {
+    sessionId: data.session_id,
+    messages: data.messages || [],
+  };
 }
 
 export async function fetchInterviewSessions(limit: number = 50): Promise<InterviewSessionSummary[]> {
