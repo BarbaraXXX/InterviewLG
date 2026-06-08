@@ -6,6 +6,13 @@ from pathlib import Path
 
 import aiosqlite
 
+from interview_agent.interview_state import (
+    complete_stage_and_choose_next,
+    dump_stage_plan,
+    initial_stage_plan,
+    transition_stage_plan,
+)
+
 logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(os.getenv("INTERVIEW_AGENT_DATA_DIR", Path.cwd() / "data"))
@@ -269,8 +276,8 @@ async def create_session(
             ),
         )
         await db.execute(
-            "INSERT INTO session_states (session_id, target) VALUES (?, ?)",
-            (session_id, difficulty),
+            "INSERT INTO session_states (session_id, target, stage_goal_status) VALUES (?, ?, ?)",
+            (session_id, difficulty, dump_stage_plan(initial_stage_plan("opening"))),
         )
         await db.commit()
         logger.info("session created id=%s user=%s", session_id, username)
@@ -297,8 +304,8 @@ async def ensure_session_state(session_id: str, target: str = "campus_fulltime")
     db = await get_db()
     try:
         await db.execute(
-            "INSERT OR IGNORE INTO session_states (session_id, target) VALUES (?, ?)",
-            (session_id, target),
+            "INSERT OR IGNORE INTO session_states (session_id, target, stage_goal_status) VALUES (?, ?, ?)",
+            (session_id, target, dump_stage_plan(initial_stage_plan("opening"))),
         )
         await db.commit()
     finally:
@@ -317,11 +324,21 @@ async def set_session_state_stage(session_id: str, stage: str) -> dict | None:
     if row["stage"] == stage:
         return row
 
+    complete_current = str(row.get("topic_status") or "") in {"completed", "skipped"}
+    stage_goal_status = dump_stage_plan(
+        transition_stage_plan(
+            str(row.get("stage_goal_status") or "{}"),
+            str(row["stage"]),
+            stage,
+            complete_current=complete_current,
+        )
+    )
     db = await get_db()
     try:
         await db.execute(
-            "UPDATE session_states SET stage = ?, stage_round = 0, updated_at = datetime('now') WHERE session_id = ?",
-            (stage, session_id),
+            "UPDATE session_states SET stage = ?, stage_round = 0, stage_goal_status = ?, "
+            "updated_at = datetime('now') WHERE session_id = ?",
+            (stage, stage_goal_status, session_id),
         )
         await db.commit()
     finally:
@@ -346,6 +363,17 @@ async def update_session_state_control(
 
     next_stage = stage if stage is not None else row["stage"]
     stage_round = 0 if stage is not None and stage != row["stage"] else row["stage_round"]
+    next_stage_goal_status = stage_goal_status if stage_goal_status is not None else row["stage_goal_status"]
+    if stage is not None and stage != row["stage"] and stage_goal_status is None:
+        complete_current = topic_status in {"completed", "skipped"} or row["topic_status"] in {"completed", "skipped"}
+        next_stage_goal_status = dump_stage_plan(
+            transition_stage_plan(
+                str(row.get("stage_goal_status") or "{}"),
+                str(row["stage"]),
+                stage,
+                complete_current=complete_current,
+            )
+        )
 
     db = await get_db()
     try:
@@ -362,7 +390,7 @@ async def update_session_state_control(
                 covered_topics if covered_topics is not None else row["covered_topics"],
                 pending_focus if pending_focus is not None else row["pending_focus"],
                 last_user_quality if last_user_quality is not None else row["last_user_quality"],
-                stage_goal_status if stage_goal_status is not None else row["stage_goal_status"],
+                next_stage_goal_status,
                 session_id,
             ),
         )
@@ -496,12 +524,26 @@ async def advance_session_state(
     total_round = int(row["total_round"]) + 1
 
     stage = old_stage
+    stage_goal_status = str(row.get("stage_goal_status") or "{}")
     if has_active_coding_task or (old_stage == "coding" and is_coding_submission):
         stage = "coding"
+        if old_stage != "coding":
+            stage_goal_status = dump_stage_plan(
+                transition_stage_plan(
+                    stage_goal_status,
+                    old_stage,
+                    "coding",
+                    complete_current=str(row.get("topic_status") or "") in {"completed", "skipped"},
+                )
+            )
     elif old_stage == "coding":
-        stage = "technical"
+        plan, stage = complete_stage_and_choose_next(stage_goal_status, old_stage)
+        stage_goal_status = dump_stage_plan(plan)
     elif old_stage == "opening" and total_round >= 1:
         stage = "project"
+        stage_goal_status = dump_stage_plan(
+            transition_stage_plan(stage_goal_status, old_stage, stage, complete_current=True)
+        )
 
     stage_round = 1 if stage != old_stage else int(row["stage_round"]) + 1
 
@@ -509,8 +551,8 @@ async def advance_session_state(
     try:
         await db.execute(
             "UPDATE session_states SET target = ?, stage = ?, stage_round = ?, total_round = ?, "
-            "updated_at = datetime('now') WHERE session_id = ?",
-            (target, stage, stage_round, total_round, session_id),
+            "stage_goal_status = ?, updated_at = datetime('now') WHERE session_id = ?",
+            (target, stage, stage_round, total_round, stage_goal_status, session_id),
         )
         await db.commit()
     finally:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from interview_agent.interview_state import STAGE_LABELS
+from interview_agent.interview_state import STAGE_LABELS, format_stage_plan
 
 
 @dataclass(frozen=True)
@@ -65,12 +65,15 @@ def format_stage_control_context(state: dict | None) -> str:
         return ""
 
     actions = "、".join(control.allowed_actions)
+    stage_plan = format_stage_plan(str(state.get("stage_goal_status") or "{}"), control.stage)
     return "\n".join(
         [
             "本轮流程控制：",
+            f"- 阶段计划：{stage_plan}",
             f"- 控制指令：{control.instruction}",
             f"- 允许动作：{actions}",
             "- 每轮只能提出一个主要问题；如果需要追问，只围绕当前主题的一个缺口追问。",
+            "- 如果候选人要求提前或延后某个环节，可以合理配合；被打断但未完成的阶段后续需要补回。",
             "- 不要把内部阶段、主题状态、回答质量等字段直接告诉候选人。",
         ]
     )

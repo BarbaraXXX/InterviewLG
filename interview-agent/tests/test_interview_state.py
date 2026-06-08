@@ -1,3 +1,5 @@
+import json
+
 from interview_agent.db import (
     advance_session_state,
     create_session,
@@ -5,6 +7,7 @@ from interview_agent.db import (
     get_session_state,
     init_db,
     set_session_state_stage,
+    update_session_state_control,
 )
 from interview_agent.interview_state import format_state_context
 
@@ -23,6 +26,13 @@ async def test_session_state_created_with_session(isolate_env):
     assert state["total_round"] == 0
     assert state["current_topic"] == ""
     assert state["topic_status"] == "not_started"
+    assert json.loads(state["stage_goal_status"]) == {
+        "opening": "active",
+        "project": "pending",
+        "technical": "pending",
+        "coding": "pending",
+        "summary": "pending",
+    }
 
 
 async def test_advance_session_state_moves_opening_to_project(isolate_env):
@@ -35,12 +45,15 @@ async def test_advance_session_state_moves_opening_to_project(isolate_env):
     assert state["stage"] == "project"
     assert state["stage_round"] == 1
     assert state["total_round"] == 1
+    assert json.loads(state["stage_goal_status"])["opening"] == "completed"
+    assert json.loads(state["stage_goal_status"])["project"] == "active"
 
 
-async def test_coding_stage_stays_for_submission_then_returns_to_technical(isolate_env):
+async def test_coding_stage_stays_for_submission_then_returns_to_interrupted_stage(isolate_env):
     await init_db()
     user_id = await create_user("alice", "hash")
     await create_session("sid-state", user_id, "alice", "backend", "campus_fulltime")
+    await advance_session_state("sid-state", "campus_fulltime")
     await set_session_state_stage("sid-state", "coding")
 
     submitted = await advance_session_state("sid-state", "campus_fulltime", is_coding_submission=True)
@@ -48,8 +61,28 @@ async def test_coding_stage_stays_for_submission_then_returns_to_technical(isola
     assert submitted["stage_round"] == 1
 
     next_turn = await advance_session_state("sid-state", "campus_fulltime")
-    assert next_turn["stage"] == "technical"
+    assert next_turn["stage"] == "project"
     assert next_turn["stage_round"] == 1
+    assert json.loads(next_turn["stage_goal_status"])["coding"] == "completed"
+    assert json.loads(next_turn["stage_goal_status"])["project"] == "active"
+
+
+async def test_coding_stage_returns_to_summary_after_completed_technical_stage(isolate_env):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session("sid-state", user_id, "alice", "backend", "campus_fulltime")
+
+    await advance_session_state("sid-state", "campus_fulltime")
+    await update_session_state_control("sid-state", stage="technical", topic_status="completed")
+    await set_session_state_stage("sid-state", "coding")
+
+    submitted = await advance_session_state("sid-state", "campus_fulltime", is_coding_submission=True)
+    assert submitted["stage"] == "coding"
+
+    next_turn = await advance_session_state("sid-state", "campus_fulltime")
+    assert next_turn["stage"] == "summary"
+    assert json.loads(next_turn["stage_goal_status"])["technical"] == "completed"
+    assert json.loads(next_turn["stage_goal_status"])["summary"] == "active"
 
 
 def test_format_state_context():
@@ -73,4 +106,5 @@ def test_format_state_context():
     assert "LangGraph 架构" in context
     assert "追问中" in context
     assert "Redis(good)、MySQL" in context
+    assert "阶段计划" in context
     assert "不要直接向候选人复述" in context
