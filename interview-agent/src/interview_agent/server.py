@@ -15,9 +15,9 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from interview_agent.auth import authenticate, get_current_user, register
-from interview_agent.config import auth_settings, llm_settings, server_settings, vectordb_settings
+from interview_agent.config import auth_settings, context_settings, llm_settings, server_settings, vectordb_settings
 from interview_agent.context import build_agent_input
-from interview_agent.context_usage import build_context_usage, compact_usage_for_log
+from interview_agent.context_usage import build_context_usage, compact_usage_for_log, split_recent_messages_by_tokens
 from interview_agent.db import (
     advance_session_state,
     count_user_resumes,
@@ -41,7 +41,12 @@ from interview_agent.db import (
     upsert_user_interview_config,
 )
 from interview_agent.logging_config import setup_logging
-from interview_agent.memory import load_memory_context, load_user_memory_context, summarize_user_interview_preference
+from interview_agent.memory import (
+    load_memory_context,
+    load_running_summary_context,
+    load_user_memory_context,
+    summarize_user_interview_preference,
+)
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS, build_system_prompt
 from interview_agent.session import session_manager
@@ -723,9 +728,13 @@ async def _estimate_session_context_usage(session: dict, user_id: int) -> dict:
         session.get("structured_jd", ""),
         session.get("structured_profile", ""),
     )
+    running_summary_context = await load_running_summary_context(session["id"])
+    if running_summary_context:
+        _older, messages = split_recent_messages_by_tokens(messages, context_settings.recent_messages_keep_tokens)
     return build_context_usage(
         system_prompt=system_prompt,
         messages=messages,
+        running_summary_context=running_summary_context,
         state_context=state_context,
         user_memory_context=await load_user_memory_context(user_id),
         session_memory_context=await load_memory_context(session["id"]),
@@ -911,6 +920,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             session_row.get("structured_profile", ""),
         ),
         messages=agent_input.messages,
+        running_summary_context=agent_input.running_summary_context,
         state_context=agent_input.state_context,
         user_memory_context=agent_input.user_memory_context,
         session_memory_context=agent_input.memory_context,

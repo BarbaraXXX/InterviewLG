@@ -1,10 +1,13 @@
 import json
 
+from langchain_core.messages import AIMessage, HumanMessage
+
 from interview_agent.db import (
     create_message,
     create_session,
     create_session_memory,
     create_user,
+    get_session_memory,
     get_user_memory,
     init_db,
     list_session_memories,
@@ -14,6 +17,7 @@ from interview_agent.memory import (
     format_user_memory_context,
     load_user_memory_context,
     summarize_completed_topic,
+    summarize_running_context,
     summarize_user_interview_preference,
 )
 
@@ -62,6 +66,29 @@ class FakeUserMemoryLLM:
     async def ainvoke(self, messages):
         FakeUserMemoryLLM.calls += 1
         return FakeUserMemoryResponse()
+
+
+class FakeRunningSummaryResponse:
+    content = json.dumps(
+        {
+            "summary": "候选人介绍了早期项目背景，并回答了缓存相关问题。",
+            "important_facts": ["项目涉及 Redis 缓存"],
+            "covered_topics": ["缓存穿透"],
+            "open_threads": ["后续继续观察边界条件"],
+        },
+        ensure_ascii=False,
+    )
+
+
+class FakeRunningSummaryLLM:
+    calls = 0
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    async def ainvoke(self, messages):
+        FakeRunningSummaryLLM.calls += 1
+        return FakeRunningSummaryResponse()
 
 
 async def test_summarize_completed_topic_creates_memory_once(isolate_env, monkeypatch):
@@ -201,3 +228,32 @@ async def test_load_user_memory_context(isolate_env):
     assert "用户长期面试偏好摘要" in context
     assert "复杂边界条件不足" in context
     assert "不要直接向候选人复述" in context
+
+
+async def test_summarize_running_context_keeps_recent_messages(isolate_env, monkeypatch):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session("sid-running", user_id, "alice", "backend", "campus_fulltime")
+    messages = [
+        HumanMessage(content="我做过 Redis 项目。" * 60),
+        AIMessage(content="请解释缓存穿透。" * 60),
+        HumanMessage(content="缓存穿透可以用布隆过滤器处理。" * 60),
+        AIMessage(content="我们继续看边界条件。"),
+    ]
+    FakeRunningSummaryLLM.calls = 0
+    monkeypatch.setattr("interview_agent.memory.ChatOpenAI", FakeRunningSummaryLLM)
+
+    context, recent = await summarize_running_context(
+        session_id="sid-running",
+        messages=messages,
+        trigger_tokens=10,
+        keep_tokens=80,
+        max_summary_tokens=300,
+    )
+
+    assert FakeRunningSummaryLLM.calls == 1
+    assert "本场面试早期对话滚动摘要" in context
+    assert 0 < len(recent) < len(messages)
+    stored = await get_session_memory("sid-running", "running_summary", "__session__")
+    assert stored is not None
+    assert "缓存" in stored["summary"]

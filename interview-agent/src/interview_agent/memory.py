@@ -10,18 +10,22 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
 from interview_agent.config import llm_settings
+from interview_agent.context_usage import count_messages_tokens, count_text_tokens, split_recent_messages_by_tokens
 from interview_agent.db import (
     create_session_memory,
     get_recent_session_messages,
     get_session_memory,
     get_user_memory,
     list_session_memories,
+    upsert_session_memory,
     upsert_user_memory,
 )
 
 logger = logging.getLogger(__name__)
 
 _MEMORY_TYPE_TOPIC_SUMMARY = "topic_summary"
+_MEMORY_TYPE_RUNNING_SUMMARY = "running_summary"
+_RUNNING_SUMMARY_TOPIC = "__session__"
 _MEMORY_TYPE_USER_PREFERENCE = "interview_preference"
 _USER_MEMORY_KEY_DEFAULT = "default"
 _MAX_MESSAGE_CHARS = 1600
@@ -62,6 +66,24 @@ _USER_MEMORY_PROMPT = """你是模拟面试系统的用户级长期记忆维护�
 - 不要记录姓名、联系方式、证件号、精确公司隐私、住址等敏感个人信息。
 - 不要保存大段原文，不要把单场偶然表现夸大成稳定结论。
 - 如果证据不足，用谨慎措辞，例如“目前看起来”“可继续观察”。
+"""
+
+_RUNNING_SUMMARY_PROMPT = """你是模拟面试系统的会话滚动摘要器。
+你只负责把较早的面试对话压缩进一条本场 running summary，不要生成给候选人看的内容。
+
+必须只输出 JSON 对象：
+{
+  "summary": "本场面试到目前为止的重要对话事实摘要",
+  "important_facts": ["最多6条候选人背景、项目、回答事实"],
+  "covered_topics": ["最多8个已涉及主题"],
+  "open_threads": ["最多5个后续仍需观察或可追问的问题"]
+}
+
+要求：
+- 合并旧 running summary 和本次新增的较早对话，避免重复。
+- 保留面试连续性需要的事实，不要保存大段原文。
+- 不要记录姓名、联系方式、证件号、住址等敏感个人信息。
+- 不要总结最近窗口里的新对话，调用方会继续保留最近原文。
 """
 
 
@@ -129,6 +151,31 @@ def _normalize_user_memory(raw: dict, *, previous_summary: str, session_context:
     return json.dumps(payload, ensure_ascii=False)[:_MAX_USER_MEMORY_CHARS]
 
 
+def _normalize_running_summary(raw: dict, *, previous_summary: str) -> str:
+    fallback = "本场面试早期对话已压缩，细节可参考完整历史记录。"
+    if previous_summary:
+        try:
+            previous = json.loads(previous_summary)
+            if isinstance(previous, dict):
+                fallback = _clean_text(previous.get("summary"), 520) or fallback
+        except json.JSONDecodeError:
+            fallback = _clean_text(previous_summary, 520) or fallback
+
+    def clean_list(value: Any, limit: int) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        items = [_clean_text(item, 220) for item in value[:limit]]
+        return [item for item in items if item]
+
+    payload = {
+        "summary": _clean_text(raw.get("summary") or fallback, 760),
+        "important_facts": clean_list(raw.get("important_facts"), 6),
+        "covered_topics": clean_list(raw.get("covered_topics"), 8),
+        "open_threads": clean_list(raw.get("open_threads"), 5),
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def _format_messages(messages: list[dict]) -> str:
     lines = []
     for message in messages:
@@ -137,6 +184,27 @@ def _format_messages(messages: list[dict]) -> str:
         if content:
             lines.append(f"{role}：{content}")
     return "\n\n".join(lines)
+
+
+def _format_langchain_messages(messages) -> str:
+    lines = []
+    for message in messages:
+        role = "候选人" if isinstance(message, HumanMessage) else "面试官"
+        content = message.content if isinstance(message.content, str) else str(message.content)
+        content = _clean_text(content, _MAX_MESSAGE_CHARS)
+        if content:
+            lines.append(f"{role}：{content}")
+    return "\n\n".join(lines)
+
+
+def _running_summary_metadata(memory: dict | None) -> dict:
+    if not memory:
+        return {}
+    try:
+        parsed = json.loads(str(memory.get("evidence_message_ids") or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _memory_to_line(memory: dict) -> str:
@@ -185,6 +253,31 @@ def _user_memory_to_lines(memory: dict) -> list[str]:
     return [line for line in lines if line.strip()]
 
 
+def _running_summary_to_lines(memory: dict) -> list[str]:
+    raw_summary = str(memory.get("summary") or "")
+    try:
+        data = json.loads(raw_summary)
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    summary = _clean_text(data.get("summary") or raw_summary, 620)
+    facts = data.get("important_facts") if isinstance(data.get("important_facts"), list) else []
+    topics = data.get("covered_topics") if isinstance(data.get("covered_topics"), list) else []
+    threads = data.get("open_threads") if isinstance(data.get("open_threads"), list) else []
+    lines = ["本场面试早期对话滚动摘要："]
+    if summary:
+        lines.append(f"- 概况：{summary}")
+    if facts:
+        lines.append("- 重要事实：" + "、".join(_clean_text(item, 120) for item in facts[:4] if item))
+    if topics:
+        lines.append("- 已涉及主题：" + "、".join(_clean_text(item, 80) for item in topics[:6] if item))
+    if threads:
+        lines.append("- 待观察线索：" + "、".join(_clean_text(item, 100) for item in threads[:4] if item))
+    lines.append("以上摘要来自较早对话，只用于保持连续性；最近对话仍以原文为准。")
+    return [line for line in lines if line.strip()]
+
+
 def format_memory_context(memories: list[dict]) -> str:
     if not memories:
         return ""
@@ -198,6 +291,17 @@ def format_memory_context(memories: list[dict]) -> str:
 async def load_memory_context(session_id: str, limit: int = 6) -> str:
     memories = await list_session_memories(session_id, limit=limit, memory_type=_MEMORY_TYPE_TOPIC_SUMMARY)
     return format_memory_context(memories)
+
+
+def format_running_summary_context(memory: dict | None) -> str:
+    if memory is None:
+        return ""
+    return "\n".join(_running_summary_to_lines(memory))
+
+
+async def load_running_summary_context(session_id: str) -> str:
+    memory = await get_session_memory(session_id, _MEMORY_TYPE_RUNNING_SUMMARY, _RUNNING_SUMMARY_TOPIC)
+    return format_running_summary_context(memory)
 
 
 def format_user_memory_context(memory: dict | None) -> str:
@@ -261,6 +365,78 @@ async def summarize_completed_topic(
     if memory:
         logger.info("session memory created session=%s topic=%s type=%s", session_id, topic, _MEMORY_TYPE_TOPIC_SUMMARY)
     return memory
+
+
+async def summarize_running_context(
+    *,
+    session_id: str,
+    messages,
+    trigger_tokens: int,
+    keep_tokens: int,
+    max_summary_tokens: int,
+    provider_name: str | None = None,
+) -> tuple[str, list]:
+    existing = await get_session_memory(session_id, _MEMORY_TYPE_RUNNING_SUMMARY, _RUNNING_SUMMARY_TOPIC)
+    metadata = _running_summary_metadata(existing)
+    summarized_count = int(metadata.get("summarized_count") or 0)
+    summarized_count = min(max(summarized_count, 0), len(messages))
+    pending_messages = messages[summarized_count:]
+    pending_tokens = count_messages_tokens(pending_messages)
+    if pending_tokens <= trigger_tokens:
+        return format_running_summary_context(existing), pending_messages
+
+    older_messages, recent_messages = split_recent_messages_by_tokens(pending_messages, keep_tokens)
+    if not older_messages:
+        return format_running_summary_context(existing), pending_messages
+
+    previous_summary = existing["summary"] if existing else ""
+    provider = llm_settings.get_provider(provider_name)
+    llm = ChatOpenAI(
+        base_url=provider.base_url,
+        api_key=provider.api_key,
+        model=provider.model,
+        temperature=0,
+    )
+    prompt = "\n\n".join(
+        [
+            "旧 running summary：",
+            previous_summary or "暂无",
+            "本次需要压缩的较早对话：",
+            _format_langchain_messages(older_messages),
+            f"目标：摘要整体不超过约 {max_summary_tokens} tokens。",
+        ]
+    )
+    response = await llm.ainvoke([SystemMessage(content=_RUNNING_SUMMARY_PROMPT), HumanMessage(content=prompt)])
+    content = response.content if isinstance(response.content, str) else ""
+    summary = _normalize_running_summary(_load_json_object(content), previous_summary=previous_summary)
+    while count_text_tokens(summary) > max_summary_tokens and len(summary) > 500:
+        summary = summary[: int(len(summary) * 0.85)]
+
+    await upsert_session_memory(
+        session_id,
+        _MEMORY_TYPE_RUNNING_SUMMARY,
+        _RUNNING_SUMMARY_TOPIC,
+        summary,
+        json.dumps(
+            {
+                "summarized_count": summarized_count + len(older_messages),
+                "pending_tokens": pending_tokens,
+                "kept_count": len(recent_messages),
+            },
+            ensure_ascii=False,
+        ),
+    )
+    context = format_running_summary_context(
+        {"summary": summary, "topic": _RUNNING_SUMMARY_TOPIC, "memory_type": _MEMORY_TYPE_RUNNING_SUMMARY}
+    )
+    logger.info(
+        "running summary updated session=%s old_message_tokens=%d kept_tokens=%d summary_tokens=%d",
+        session_id,
+        pending_tokens,
+        count_messages_tokens(recent_messages),
+        count_text_tokens(context),
+    )
+    return context, recent_messages
 
 
 def _format_topic_memories_for_user_update(memories: list[dict]) -> str:

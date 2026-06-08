@@ -391,6 +391,29 @@ async def create_session_memory(
     return await get_session_memory(session_id, memory_type, topic)
 
 
+async def upsert_session_memory(
+    session_id: str,
+    memory_type: str,
+    topic: str,
+    summary: str,
+    evidence_message_ids: str = "[]",
+) -> dict | None:
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO session_memories "
+            "(session_id, memory_type, topic, summary, evidence_message_ids) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(session_id, memory_type, topic) DO UPDATE SET "
+            "summary = excluded.summary, "
+            "evidence_message_ids = excluded.evidence_message_ids",
+            (session_id, memory_type, topic, summary, evidence_message_ids),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+    return await get_session_memory(session_id, memory_type, topic)
+
+
 async def list_session_memories(session_id: str, limit: int = 6, memory_type: str = "topic_summary") -> list[dict]:
     db = await get_db()
     try:

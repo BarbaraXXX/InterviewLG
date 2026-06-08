@@ -72,4 +72,41 @@ async def test_build_agent_input_replaces_context_message_and_appends_rag(monkey
     assert "真实面试题参考" in agent_input.messages[-1].content
     assert "边界条件分析不足" in agent_input.user_memory_context
     assert "缓存穿透掌握较好" in agent_input.memory_context
+    assert agent_input.running_summary_context == ""
     assert "边界条件" in agent_input.stage_control_context
+
+
+async def test_build_agent_input_injects_running_summary(monkeypatch):
+    async def fake_load_messages(session_id):
+        assert session_id == "sid-1"
+        return [
+            HumanMessage(content="早期问题"),
+            AIMessage(content="早期回答"),
+            HumanMessage(content="当前问题"),
+        ]
+
+    async def fake_summarize_running_context(**kwargs):
+        assert kwargs["session_id"] == "sid-1"
+        return "本场面试早期对话滚动摘要：\n- 已问过 Redis", [HumanMessage(content="当前问题")]
+
+    async def fake_search(query, domain):
+        assert "已问过 Redis" in query
+        return []
+
+    monkeypatch.setattr(context_module, "summarize_running_context", fake_summarize_running_context)
+    monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
+
+    agent_input = await context_module.build_agent_input(
+        session_id="sid-1",
+        domain="backend",
+        difficulty="campus_fulltime",
+        display_message="当前问题",
+        context_message="",
+        load_messages=fake_load_messages,
+    )
+
+    assert isinstance(agent_input.messages[0], SystemMessage)
+    assert "本场面试早期对话滚动摘要" in agent_input.messages[0].content
+    assert isinstance(agent_input.messages[1], HumanMessage)
+    assert agent_input.messages[1].content == "当前问题"
+    assert "已问过 Redis" in agent_input.running_summary_context

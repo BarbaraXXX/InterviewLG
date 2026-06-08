@@ -15,6 +15,7 @@ _MESSAGE_OVERHEAD_TOKENS = 6
 _SECTION_LABELS = {
     "system_prompt": "固定规则",
     "messages": "短期对话",
+    "running_summary": "滚动摘要",
     "state": "当前状态",
     "user_memory": "用户记忆",
     "session_memory": "本场摘要",
@@ -63,6 +64,26 @@ def count_messages_tokens(messages: list[BaseMessage]) -> int:
     return sum(count_message_tokens(message) for message in messages)
 
 
+def split_recent_messages_by_tokens(messages: list[BaseMessage], keep_tokens: int) -> tuple[list[BaseMessage], list[BaseMessage]]:
+    if keep_tokens <= 0:
+        return messages, []
+
+    kept_reversed: list[BaseMessage] = []
+    total = 0
+    for message in reversed(messages):
+        tokens = count_message_tokens(message)
+        if kept_reversed and total + tokens > keep_tokens:
+            break
+        kept_reversed.append(message)
+        total += tokens
+        if total >= keep_tokens:
+            break
+
+    recent = list(reversed(kept_reversed))
+    older_count = max(len(messages) - len(recent), 0)
+    return messages[:older_count], recent
+
+
 def _conversation_messages(messages: list[BaseMessage]) -> list[BaseMessage]:
     return [message for message in messages if not isinstance(message, SystemMessage)]
 
@@ -84,6 +105,7 @@ def build_context_usage(
     system_prompt: str = "",
     messages: list[BaseMessage] | None = None,
     state_context: str = "",
+    running_summary_context: str = "",
     user_memory_context: str = "",
     session_memory_context: str = "",
     stage_control_context: str = "",
@@ -93,6 +115,7 @@ def build_context_usage(
     sections = [
         _section("system_prompt", count_text_tokens(system_prompt)),
         _section("messages", count_messages_tokens(conversation)),
+        _section("running_summary", count_text_tokens(running_summary_context)),
         _section("state", count_text_tokens(state_context)),
         _section("user_memory", count_text_tokens(user_memory_context)),
         _section("session_memory", count_text_tokens(session_memory_context)),

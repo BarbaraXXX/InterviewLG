@@ -143,6 +143,9 @@ class ContextSettings(BaseSettings):
     output_reserve_tokens: int = 4096
     input_budget_tokens: int = 24000
     tokenizer_encoding: str = "cl100k_base"
+    recent_messages_trigger_tokens: int = 8000
+    recent_messages_keep_tokens: int = 5000
+    running_summary_max_tokens: int = 2500
 
     @field_validator("window_tokens")
     @classmethod
@@ -158,6 +161,21 @@ class ContextSettings(BaseSettings):
     @classmethod
     def _validate_input_budget(cls, value: int) -> int:
         return min(max(value, 2048), 262144)
+
+    @field_validator("recent_messages_trigger_tokens")
+    @classmethod
+    def _validate_recent_trigger(cls, value: int) -> int:
+        return min(max(value, 1024), 131072)
+
+    @field_validator("recent_messages_keep_tokens")
+    @classmethod
+    def _validate_recent_keep(cls, value: int) -> int:
+        return min(max(value, 512), 131072)
+
+    @field_validator("running_summary_max_tokens")
+    @classmethod
+    def _validate_summary_max(cls, value: int) -> int:
+        return min(max(value, 256), 32768)
 
 
 class ServerSettings(BaseSettings):
@@ -208,6 +226,12 @@ def _log_loaded_settings() -> None:
             context_settings.input_budget_tokens,
             context_settings.output_reserve_tokens,
             context_settings.tokenizer_encoding,
+        )
+        logger.info(
+            "context rolling summary trigger=%d keep=%d summary_max=%d",
+            context_settings.recent_messages_trigger_tokens,
+            context_settings.recent_messages_keep_tokens,
+            context_settings.running_summary_max_tokens,
         )
     except Exception:
         logger.warning("failed to log loaded settings", exc_info=True)
