@@ -380,6 +380,27 @@ def test_get_session_detail_returns_messages_for_owner(auth_client):
     assert body["coding_tasks"] == []
 
 
+def test_get_session_context_usage(auth_client):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-usage", user_id, "tester", "backend", "campus_fulltime")
+      await create_message("sid-usage", "user", "请开始面试", 0)
+
+    anyio.run(seed)
+
+    resp = auth_client.get("/api/sessions/sid-usage/context-usage")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_tokens"] > 0
+    assert body["input_budget_tokens"] > 0
+    assert body["status"] in {"normal", "warning", "critical"}
+    assert body["is_estimate"] is True
+    assert any(section["key"] == "messages" for section in body["sections"])
+
+
 def test_coding_task_active_and_submit(auth_client):
     import anyio
 
@@ -717,6 +738,21 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
     async def fake_get_user(username):
         return {"id": 1, "username": username}
 
+    async def fake_get_session_for_user(session_id, user_id):
+        return {
+            "id": session_id,
+            "user_id": user_id,
+            "username": "tester",
+            "domain": "redis",
+            "difficulty": "campus_fulltime",
+            "structured_jd": "",
+            "structured_profile": "",
+            "resume_title_snapshot": "",
+            "status": "active",
+            "created_at": "2026-01-01 00:00:00",
+            "ended_at": None,
+        }
+
     async def fake_search(query, domain):
         assert domain == "redis"
         return [{"topic": "ZSet", "question": "Zset底层是怎么实现的？", "followups": ["跳表怎么实现？"]}]
@@ -729,6 +765,7 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
 
     monkeypatch.setattr(server_module, "session_manager", fake_manager)
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
+    monkeypatch.setattr(server_module, "get_session_for_user", fake_get_session_for_user)
     monkeypatch.setattr(server_module, "advance_session_state", fake_advance)
     monkeypatch.setattr(server_module, "record_turn_state", fake_record_turn_state)
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
@@ -751,6 +788,21 @@ def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):
     async def fake_get_user(username):
         return {"id": 1, "username": username}
 
+    async def fake_get_session_for_user(session_id, user_id):
+        return {
+            "id": session_id,
+            "user_id": user_id,
+            "username": "tester",
+            "domain": "redis",
+            "difficulty": "campus_fulltime",
+            "structured_jd": "",
+            "structured_profile": "",
+            "resume_title_snapshot": "",
+            "status": "active",
+            "created_at": "2026-01-01 00:00:00",
+            "ended_at": None,
+        }
+
     async def fake_search(query, domain):
         assert "完整代码上下文" in query
         return []
@@ -763,6 +815,7 @@ def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):
 
     monkeypatch.setattr(server_module, "session_manager", fake_manager)
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
+    monkeypatch.setattr(server_module, "get_session_for_user", fake_get_session_for_user)
     monkeypatch.setattr(server_module, "advance_session_state", fake_advance)
     monkeypatch.setattr(server_module, "record_turn_state", fake_record_turn_state)
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)

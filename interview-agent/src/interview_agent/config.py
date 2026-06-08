@@ -131,6 +131,35 @@ class RAGSettings(BaseSettings):
         return min(max(value, 200), 4000)
 
 
+class ContextSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="CONTEXT_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    window_tokens: int = 32768
+    output_reserve_tokens: int = 4096
+    input_budget_tokens: int = 24000
+    tokenizer_encoding: str = "cl100k_base"
+
+    @field_validator("window_tokens")
+    @classmethod
+    def _validate_window(cls, value: int) -> int:
+        return min(max(value, 4096), 262144)
+
+    @field_validator("output_reserve_tokens")
+    @classmethod
+    def _validate_reserve(cls, value: int) -> int:
+        return min(max(value, 512), 32768)
+
+    @field_validator("input_budget_tokens")
+    @classmethod
+    def _validate_input_budget(cls, value: int) -> int:
+        return min(max(value, 2048), 262144)
+
+
 class ServerSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SERVER_",
@@ -152,6 +181,7 @@ mcp_settings = MCPSettings()
 auth_settings = AuthSettings()
 vectordb_settings = VectorDBSettings()
 rag_settings = RAGSettings()
+context_settings = ContextSettings()
 server_settings = ServerSettings()
 
 
@@ -171,6 +201,13 @@ def _log_loaded_settings() -> None:
             rag_settings.min_score,
             rag_settings.timeout_seconds,
             rag_settings.max_context_chars,
+        )
+        logger.info(
+            "context settings window_tokens=%d input_budget_tokens=%d output_reserve_tokens=%d tokenizer=%s",
+            context_settings.window_tokens,
+            context_settings.input_budget_tokens,
+            context_settings.output_reserve_tokens,
+            context_settings.tokenizer_encoding,
         )
     except Exception:
         logger.warning("failed to log loaded settings", exc_info=True)

@@ -7,6 +7,7 @@ import {
   deleteResume,
   endInterviewSession,
   fetchActiveCodingTask,
+  fetchContextUsage,
   fetchDomains,
   fetchInterviewSessionDetail,
   fetchInterviewSessions,
@@ -23,6 +24,7 @@ import {
   submitCodingTask,
   updateResume,
   type CodingTask,
+  type ContextUsage,
   type InterviewMessage,
   type InterviewSessionDetail,
   type InterviewSessionSummary,
@@ -1920,6 +1922,29 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
   );
 }
 
+function ContextUsageMeter({ usage }: { usage: ContextUsage }) {
+  const percent = Math.max(0, Math.min(999, Math.round((usage.ratio || 0) * 100)));
+  const fillPercent = Math.min(percent, 100);
+  const title = [
+    `上下文占用：${usage.total_tokens} / ${usage.input_budget_tokens} tokens`,
+    `窗口：${usage.context_window_tokens}，输出预留：${usage.output_reserve_tokens}`,
+    ...usage.sections
+      .filter((section) => section.tokens > 0)
+      .map((section) => `${section.label}: ${section.tokens}`),
+    usage.is_estimate ? '该数值为 tokenizer 近似估算' : '',
+  ].filter(Boolean).join('\n');
+
+  return (
+    <div className={`context-usage-meter ${usage.status}`} title={title} aria-label={`上下文占用 ${percent}%`}>
+      <span className="context-usage-label">上下文</span>
+      <div className="context-usage-track" aria-hidden="true">
+        <div className="context-usage-fill" style={{ width: `${fillPercent}%` }} />
+      </div>
+      <span className="context-usage-percent">{percent}%</span>
+    </div>
+  );
+}
+
 function ChatView({
   sessionId,
   domain,
@@ -1944,6 +1969,7 @@ function ChatView({
   const [isStreaming, setIsStreaming] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
   const [codingTask, setCodingTask] = useState<CodingTask | null>(null);
+  const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -1954,6 +1980,19 @@ function ChatView({
   useEffect(() => {
     scrollToBottom();
   }, [messages, scrollToBottom]);
+
+  const refreshContextUsage = useCallback(async () => {
+    try {
+      const usage = await fetchContextUsage(sessionId);
+      setContextUsage(usage);
+    } catch {
+      setContextUsage(null);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    void refreshContextUsage();
+  }, [refreshContextUsage]);
 
   const refreshCodingTask = useCallback(async () => {
     try {
@@ -2010,11 +2049,12 @@ function ChatView({
         );
         setIsStreaming(false);
         void refreshCodingTask();
+        void refreshContextUsage();
       },
       contextMessage,
     );
     abortRef.current = controller;
-  }, [isStreaming, refreshCodingTask, sessionId]);
+  }, [isStreaming, refreshCodingTask, refreshContextUsage, sessionId]);
 
   const handleSend = () => {
     startAgentStream(input);
@@ -2060,6 +2100,7 @@ function ChatView({
           <span className="chat-header-diff">{diffLabel}</span>
         </div>
         <div className="chat-header-actions">
+          {contextUsage && <ContextUsageMeter usage={contextUsage} />}
           <ThemeToggle theme={theme} onToggle={onToggleTheme} />
           <button className="pause-button" onClick={handlePause}>
             中断面试

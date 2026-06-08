@@ -17,6 +17,7 @@ from slowapi.util import get_remote_address
 from interview_agent.auth import authenticate, get_current_user, register
 from interview_agent.config import auth_settings, llm_settings, server_settings, vectordb_settings
 from interview_agent.context import build_agent_input
+from interview_agent.context_usage import build_context_usage, compact_usage_for_log
 from interview_agent.db import (
     advance_session_state,
     count_user_resumes,
@@ -42,7 +43,7 @@ from interview_agent.db import (
 from interview_agent.logging_config import setup_logging
 from interview_agent.memory import load_memory_context, load_user_memory_context, summarize_user_interview_preference
 from interview_agent.migrate import migrate_users_if_needed
-from interview_agent.prompts import PRESET_DOMAINS
+from interview_agent.prompts import PRESET_DOMAINS, build_system_prompt
 from interview_agent.session import session_manager
 from interview_agent.state_updater import record_turn_state
 
@@ -50,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 _APP_ROOT = Path(os.getenv("INTERVIEW_AGENT_APP_ROOT", Path.cwd()))
 _STATIC_DIR = _APP_ROOT / "web" / "dist"
+_CONTEXT_USAGE_CACHE: dict[str, dict] = {}
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
@@ -684,6 +686,8 @@ async def delete_sessions(req: DeleteSessionsRequest, username: str = Depends(ge
     if len(session_ids) > 100:
         raise HTTPException(status_code=400, detail="Too many sessions to delete")
     deleted = await session_manager.delete_many(session_ids, username, user["id"])
+    for session_id in session_ids:
+        _CONTEXT_USAGE_CACHE.pop(session_id, None)
     return {"deleted": deleted}
 
 
@@ -700,6 +704,45 @@ async def get_session_detail(session_id: str, username: str = Depends(get_curren
         "messages": messages,
         "coding_tasks": [_serialize_coding_task(task) for task in coding_tasks],
     }
+
+
+async def _estimate_session_context_usage(session: dict, user_id: int) -> dict:
+    messages = await session_manager.load_messages(session["id"])
+    state = await get_session_state(session["id"])
+    state_context = ""
+    stage_control_context = ""
+    if state:
+        from interview_agent.interview_state import format_state_context
+        from interview_agent.stage_controller import format_stage_control_context
+
+        state_context = format_state_context(state)
+        stage_control_context = format_stage_control_context(state)
+    system_prompt = build_system_prompt(
+        session["domain"],
+        session["difficulty"],
+        session.get("structured_jd", ""),
+        session.get("structured_profile", ""),
+    )
+    return build_context_usage(
+        system_prompt=system_prompt,
+        messages=messages,
+        state_context=state_context,
+        user_memory_context=await load_user_memory_context(user_id),
+        session_memory_context=await load_memory_context(session["id"]),
+        stage_control_context=stage_control_context,
+        rag_context="",
+    )
+
+
+@app.get("/api/sessions/{session_id}/context-usage")
+async def get_session_context_usage(session_id: str, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session_id in _CONTEXT_USAGE_CACHE:
+        return _CONTEXT_USAGE_CACHE[session_id]
+    return await _estimate_session_context_usage(session, user["id"])
 
 
 @app.get("/api/sessions/{session_id}/coding-task/active")
@@ -772,6 +815,7 @@ async def end_session(session_id: str, username: str = Depends(get_current_user)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     await session_manager.end_session(session_id)
+    _CONTEXT_USAGE_CACHE.pop(session_id, None)
     asyncio.create_task(update_user_memory_safely(user["id"], session_id))
     return {"ok": True}
 
@@ -785,6 +829,7 @@ async def pause_session(session_id: str, username: str = Depends(get_current_use
     if session["status"] != "active":
         raise HTTPException(status_code=409, detail="Only active sessions can be paused")
     await session_manager.pause_session(session_id)
+    _CONTEXT_USAGE_CACHE.pop(session_id, None)
     return {"ok": True}
 
 
@@ -821,6 +866,9 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
     ses = await session_manager.get_or_rebuild_agent(req.session_id, username, user["id"])
     if ses is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    session_row = await get_session_for_user(req.session_id, user["id"])
+    if session_row is None:
+        raise HTTPException(status_code=404, detail="Session not found")
 
     logger.info("chat_stream start user=%s session=%s msg_len=%d", username, req.session_id, len(req.message))
 
@@ -855,6 +903,30 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             len(agent_input.rag_cards),
             len(agent_input.rag_context),
         )
+    usage = build_context_usage(
+        system_prompt=build_system_prompt(
+            session_row["domain"],
+            session_row["difficulty"],
+            session_row.get("structured_jd", ""),
+            session_row.get("structured_profile", ""),
+        ),
+        messages=agent_input.messages,
+        state_context=agent_input.state_context,
+        user_memory_context=agent_input.user_memory_context,
+        session_memory_context=agent_input.memory_context,
+        stage_control_context=agent_input.stage_control_context,
+        rag_context=agent_input.rag_context,
+    )
+    logger.info(
+        "context usage session=%s total_tokens=%d budget=%d ratio=%.2f status=%s sections=%s",
+        req.session_id,
+        usage["total_tokens"],
+        usage["input_budget_tokens"],
+        usage["ratio"],
+        usage["status"],
+        compact_usage_for_log(usage),
+    )
+    _CONTEXT_USAGE_CACHE[req.session_id] = usage
 
     async def record_interview_state_safely(user_message: str, agent_reply: str) -> None:
         try:
@@ -903,6 +975,7 @@ async def delete_session(
     deleted = await session_manager.delete(session_id, username, user["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
+    _CONTEXT_USAGE_CACHE.pop(session_id, None)
     return {"ok": True}
 
 

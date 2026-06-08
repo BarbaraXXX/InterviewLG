@@ -2270,6 +2270,63 @@ body {
   flex-shrink: 0;
 }
 
+.context-usage-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 164px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-muted);
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.context-usage-label {
+  color: var(--color-text-tertiary);
+}
+
+.context-usage-track {
+  position: relative;
+  width: 54px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-border-subtle);
+}
+
+.context-usage-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-accent);
+  transition: width var(--transition-fast);
+}
+
+.context-usage-meter.warning .context-usage-fill {
+  background: var(--color-warm);
+}
+
+.context-usage-meter.critical .context-usage-fill {
+  background: var(--color-danger);
+}
+
+.context-usage-meter.warning {
+  border-color: color-mix(in srgb, var(--color-warm) 45%, var(--color-border));
+}
+
+.context-usage-meter.critical {
+  border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+}
+
+.context-usage-percent {
+  min-width: 34px;
+  text-align: right;
+  color: var(--color-text);
+}
+
 .chat-header-dot {
   width: 8px;
   height: 8px;

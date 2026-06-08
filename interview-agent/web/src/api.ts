@@ -24,6 +24,25 @@ export interface InterviewSessionDetail {
   coding_tasks: CodingTask[];
 }
 
+export interface ContextUsageSection {
+  key: string;
+  label: string;
+  tokens: number;
+  ratio: number;
+}
+
+export interface ContextUsage {
+  total_tokens: number;
+  input_budget_tokens: number;
+  context_window_tokens: number;
+  output_reserve_tokens: number;
+  ratio: number;
+  status: 'normal' | 'warning' | 'critical';
+  tokenizer: string;
+  is_estimate: boolean;
+  sections: ContextUsageSection[];
+}
+
 export interface CodingTaskExample {
   input: string;
   output: string;
@@ -266,6 +285,20 @@ export async function fetchInterviewSessionDetail(sessionId: string): Promise<In
   }
   if (!res.ok) {
     throw new Error('Failed to fetch interview session');
+  }
+  return res.json();
+}
+
+export async function fetchContextUsage(sessionId: string): Promise<ContextUsage> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/context-usage`, {
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to fetch context usage');
   }
   return res.json();
 }
