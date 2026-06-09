@@ -24,5 +24,6 @@ def isolate_env(monkeypatch, tmp_path):
     monkeypatch.setattr("interview_vectordb.db._PROFILES_DIR", profiles_dir)
     monkeypatch.setattr("interview_vectordb.db._EXPERIENCES_DIR", experiences_dir)
     monkeypatch.setattr("interview_vectordb.db._QUESTION_CARDS_DB_PATH", data_dir / "question_cards" / "question_cards.sqlite3")
+    monkeypatch.setattr("interview_vectordb.db._CODING_PROBLEMS_DB_PATH", data_dir / "coding_problems" / "coding_problems.sqlite3")
 
     yield data_dir

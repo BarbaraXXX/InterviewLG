@@ -414,6 +414,8 @@ def _serialize_coding_task(task: dict | None) -> dict | None:
         "submitted_code": task["submitted_code"],
         "revision_instruction": task["revision_instruction"],
         "revision_count": task["revision_count"],
+        "source_problem_id": task.get("source_problem_id", ""),
+        "source_problem_title": task.get("source_problem_title", ""),
         "status": task["status"],
         "created_at": task["created_at"],
         "submitted_at": task["submitted_at"],

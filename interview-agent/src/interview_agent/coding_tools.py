@@ -6,7 +6,10 @@ import uuid
 import aiosqlite
 from langchain_core.tools import BaseTool, tool
 
+from interview_agent.coding_problem_client import get_coding_problem
+from interview_agent.coding_problem_client import search_coding_problems as client_search_coding_problems
 from interview_agent.db import create_coding_task as db_create_coding_task
+from interview_agent.db import list_used_coding_problem_ids
 from interview_agent.db import request_latest_coding_task_revision
 from interview_agent.db import set_session_state_stage
 
@@ -53,6 +56,119 @@ def _clean_examples(examples: list[dict] | None) -> list[dict]:
 
 def build_coding_tools(session_id: str) -> list[BaseTool]:
     @tool
+    async def search_coding_problems(
+        query: str = "",
+        difficulty: list[str] | None = None,
+        importance: list[str] | None = None,
+        answer_mode: list[str] | None = None,
+        topics: list[str] | None = None,
+        top_k: int = 5,
+    ) -> str:
+        """Search the coding problem bank before creating a hand-coding task.
+
+        Use this before entering the coding section. Prefer importance=["hot100"], answer_mode=["core"],
+        and pick difficulty from the candidate's observed coding/algorithm strength: easy for weak basics,
+        medium for normal campus interviews, hard only for very strong candidates or explicit requests.
+        The tool automatically excludes problems already used in the current session.
+        """
+
+        used_problem_ids = await list_used_coding_problem_ids(session_id)
+        problems = await client_search_coding_problems(
+            query=query.strip()[:1200],
+            difficulty=_clean_items(difficulty),
+            importance=_clean_items(importance) or ["hot100"],
+            answer_mode=_clean_items(answer_mode) or ["core"],
+            topics=_clean_items(topics),
+            exclude_ids=used_problem_ids,
+            top_k=min(max(int(top_k or 5), 1), 8),
+        )
+        summaries = []
+        for problem in problems:
+            statement = str(problem.get("statement") or "").strip().replace("\n", " ")
+            summaries.append(
+                {
+                    "id": problem.get("id"),
+                    "title": problem.get("title"),
+                    "difficulty": problem.get("difficulty"),
+                    "importance": problem.get("importance"),
+                    "answer_mode": problem.get("answer_mode"),
+                    "topics": problem.get("topics") or [],
+                    "statement_preview": statement[:240],
+                    "score": problem.get("score"),
+                }
+            )
+        return json.dumps(
+            {
+                "ok": True,
+                "problems": summaries,
+                "excluded_problem_ids": used_problem_ids,
+                "message": "请选择一个 problem_id 调用 create_coding_task_from_problem；若列表为空，才考虑 fallback 自拟题。",
+            },
+            ensure_ascii=False,
+        )
+
+    @tool
+    async def create_coding_task_from_problem(problem_id: str, language: str = "python") -> str:
+        """Create one hand-coding task from the approved coding problem bank.
+
+        Use this after search_coding_problems returns a suitable problem. Do not rewrite the problem statement,
+        examples, constraints, or starter code yourself. If the problem is unavailable, search again or only then
+        fall back to create_coding_task.
+        """
+
+        clean_problem_id = problem_id.strip()[:128]
+        if not clean_problem_id:
+            return json.dumps({"ok": False, "error": "problem_id is required"}, ensure_ascii=False)
+        problem = await get_coding_problem(clean_problem_id)
+        if not problem:
+            return json.dumps({"ok": False, "error": "题库中没有找到该手撕题。"}, ensure_ascii=False)
+
+        clean_language = _clean_language(language)
+        starter_code_map = problem.get("starter_code") if isinstance(problem.get("starter_code"), dict) else {}
+        starter_code = str(starter_code_map.get(clean_language) or starter_code_map.get("python") or "")[
+            :_MAX_STARTER_CODE_LEN
+        ]
+        clean_title = str(problem.get("title") or "").strip()[:_MAX_TITLE_LEN]
+        clean_description = str(problem.get("statement") or "").strip()[:_MAX_DESCRIPTION_LEN]
+        if not clean_title or not clean_description:
+            return json.dumps({"ok": False, "error": "题库题目缺少 title 或 statement。"}, ensure_ascii=False)
+
+        task_id = uuid.uuid4().hex
+        try:
+            task = await db_create_coding_task(
+                task_id=task_id,
+                session_id=session_id,
+                title=clean_title,
+                description=clean_description,
+                language=clean_language,
+                starter_code=starter_code,
+                constraints_json=json.dumps(_clean_items(problem.get("constraints")), ensure_ascii=False),
+                examples_json=json.dumps(_clean_examples(problem.get("examples")), ensure_ascii=False),
+                source_problem_id=str(problem.get("id") or clean_problem_id)[:128],
+                source_problem_title=clean_title,
+            )
+            await set_session_state_stage(session_id, "coding")
+        except aiosqlite.IntegrityError:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": "当前已经有一道未提交的手撕题，请等待候选人提交后再创建下一题。",
+                },
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            {
+                "ok": True,
+                "task_id": task["id"],
+                "problem_id": problem.get("id"),
+                "title": task["title"],
+                "message": "已从题库创建代码题，等待候选人在手撕平台提交代码。",
+            },
+            ensure_ascii=False,
+        )
+
+    @tool
     async def create_coding_task(
         title: str,
         description: str,
@@ -61,11 +177,11 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
         constraints: list[str] | None = None,
         examples: list[dict] | None = None,
     ) -> str:
-        """Create one hand-coding interview task for the current candidate.
+        """Fallback: create one hand-coding interview task manually.
 
-        Use this only when the interview should enter a coding section. Do not create another task while
-        the previous task is still active. The platform will show the task to the candidate and wait for
-        a code submission before you evaluate it.
+        Prefer search_coding_problems and create_coding_task_from_problem. Use this only when the approved
+        coding problem bank is unavailable or returns no suitable task. Do not create another task while
+        the previous task is still active.
         """
 
         clean_title = title.strip()[:_MAX_TITLE_LEN]
@@ -140,7 +256,7 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
             ensure_ascii=False,
         )
 
-    return [create_coding_task, request_coding_revision]
+    return [search_coding_problems, create_coding_task_from_problem, create_coding_task, request_coding_revision]
 
 
 def build_coding_task_tool(session_id: str) -> BaseTool:

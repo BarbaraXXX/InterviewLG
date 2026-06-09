@@ -108,6 +108,8 @@ async def init_db() -> None:
                 submitted_code TEXT,
                 revision_instruction TEXT NOT NULL DEFAULT '',
                 revision_count INTEGER NOT NULL DEFAULT 0,
+                source_problem_id TEXT NOT NULL DEFAULT '',
+                source_problem_title TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 submitted_at TEXT,
@@ -184,6 +186,8 @@ async def init_db() -> None:
         await _ensure_column(db, "coding_tasks", "draft_code", "TEXT")
         await _ensure_column(db, "coding_tasks", "revision_instruction", "TEXT NOT NULL DEFAULT ''")
         await _ensure_column(db, "coding_tasks", "revision_count", "INTEGER NOT NULL DEFAULT 0")
+        await _ensure_column(db, "coding_tasks", "source_problem_id", "TEXT NOT NULL DEFAULT ''")
+        await _ensure_column(db, "coding_tasks", "source_problem_title", "TEXT NOT NULL DEFAULT ''")
         await _ensure_column(db, "session_states", "current_topic", "TEXT NOT NULL DEFAULT ''")
         await _ensure_column(db, "session_states", "topic_status", "TEXT NOT NULL DEFAULT 'not_started'")
         await _ensure_column(db, "session_states", "stage_goal_status", "TEXT NOT NULL DEFAULT '{}'")
@@ -888,14 +892,28 @@ async def create_coding_task(
     starter_code: str,
     constraints_json: str,
     examples_json: str,
+    source_problem_id: str = "",
+    source_problem_title: str = "",
 ) -> dict:
     db = await get_db()
     try:
         await db.execute(
             "INSERT INTO coding_tasks "
-            "(id, session_id, title, description, language, starter_code, constraints_json, examples_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (task_id, session_id, title, description, language, starter_code, constraints_json, examples_json),
+            "(id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
+            "source_problem_id, source_problem_title) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                task_id,
+                session_id,
+                title,
+                description,
+                language,
+                starter_code,
+                constraints_json,
+                examples_json,
+                source_problem_id,
+                source_problem_title,
+            ),
         )
         await db.commit()
         logger.info("coding task created id=%s session=%s", task_id, session_id)
@@ -914,7 +932,7 @@ async def get_coding_task(task_id: str) -> dict | None:
         async with db.execute(
             "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
             "draft_language, draft_code, submitted_language, submitted_code, revision_instruction, revision_count, "
-            "status, created_at, submitted_at "
+            "source_problem_id, source_problem_title, status, created_at, submitted_at "
             "FROM coding_tasks WHERE id = ?",
             (task_id,),
         ) as cursor:
@@ -930,7 +948,7 @@ async def get_active_coding_task(session_id: str) -> dict | None:
         async with db.execute(
             "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
             "draft_language, draft_code, submitted_language, submitted_code, revision_instruction, revision_count, "
-            "status, created_at, submitted_at "
+            "source_problem_id, source_problem_title, status, created_at, submitted_at "
             "FROM coding_tasks WHERE session_id = ? AND status = 'active' "
             "ORDER BY datetime(created_at) DESC LIMIT 1",
             (session_id,),
@@ -947,7 +965,7 @@ async def list_session_coding_tasks(session_id: str) -> list[dict]:
         async with db.execute(
             "SELECT id, session_id, title, description, language, starter_code, constraints_json, examples_json, "
             "draft_language, draft_code, submitted_language, submitted_code, revision_instruction, revision_count, "
-            "status, created_at, submitted_at "
+            "source_problem_id, source_problem_title, status, created_at, submitted_at "
             "FROM coding_tasks WHERE session_id = ? ORDER BY datetime(created_at) ASC, rowid ASC",
             (session_id,),
         ) as cursor:
@@ -963,7 +981,8 @@ async def get_coding_task_for_user(task_id: str, user_id: int) -> dict | None:
         async with db.execute(
             "SELECT t.id, t.session_id, t.title, t.description, t.language, t.starter_code, "
             "t.constraints_json, t.examples_json, t.draft_language, t.draft_code, t.submitted_language, t.submitted_code, "
-            "t.revision_instruction, t.revision_count, t.status, t.created_at, t.submitted_at "
+            "t.revision_instruction, t.revision_count, t.source_problem_id, t.source_problem_title, "
+            "t.status, t.created_at, t.submitted_at "
             "FROM coding_tasks t "
             "JOIN sessions s ON s.id = t.session_id "
             "WHERE t.id = ? AND s.user_id = ?",
@@ -1008,6 +1027,20 @@ async def submit_coding_task_for_user(task_id: str, user_id: int, language: str,
         await db.close()
 
     return await get_coding_task_for_user(task_id, user_id)
+
+
+async def list_used_coding_problem_ids(session_id: str) -> list[str]:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT DISTINCT source_problem_id FROM coding_tasks "
+            "WHERE session_id = ? AND source_problem_id != ''",
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [str(row["source_problem_id"]) for row in rows if row["source_problem_id"]]
+    finally:
+        await db.close()
 
 
 async def request_latest_coding_task_revision(session_id: str, instruction: str = "") -> dict | None:

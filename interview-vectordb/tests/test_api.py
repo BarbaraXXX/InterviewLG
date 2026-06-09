@@ -6,10 +6,11 @@ from httpx import ASGITransport, AsyncClient
 
 from interview_vectordb import api as api_module
 from interview_vectordb.api import api_app
+from interview_vectordb.coding_problems import CodingProblemStore
 from interview_vectordb.db import ProfileDB
 from interview_vectordb.embeddings import DeterministicEmbeddingProvider
 from interview_vectordb.question_cards import QuestionCardStore
-from interview_vectordb.schema import InterviewProfile, QuestionCard
+from interview_vectordb.schema import CodingProblem, CodingProblemExample, InterviewProfile, QuestionCard
 
 
 @pytest.fixture
@@ -39,6 +40,11 @@ def test_db(mock_openai, isolate_env, monkeypatch):
         api_module,
         "_question_card_store",
         QuestionCardStore(isolate_env / "question_cards" / "question_cards.sqlite3", DeterministicEmbeddingProvider(64)),
+    )
+    monkeypatch.setattr(
+        api_module,
+        "_coding_problem_store",
+        CodingProblemStore(isolate_env / "coding_problems" / "coding_problems.sqlite3", DeterministicEmbeddingProvider(64)),
     )
     monkeypatch.setattr(api_module.security_settings, "admin_token", "test-admin-token")
     return fresh_db
@@ -200,3 +206,101 @@ async def test_search_question_cards(client):
     body = r.json()
     assert len(body["cards"]) == 1
     assert body["cards"][0]["id"] == "redis"
+
+
+async def test_coding_problems_stats_empty(client):
+    r = await client.get("/api/coding-problems/stats")
+    assert r.status_code == 200
+    assert r.json() == {"count": 0, "difficulty": {}, "importance": {}, "answer_mode": {}, "topics": {}}
+
+
+async def test_search_coding_problems(client):
+    api_module._coding_problem_store.import_problems([
+        CodingProblem(
+            id="reverse-list",
+            title="反转链表",
+            difficulty="easy",
+            importance="hot100",
+            answer_mode="core",
+            topics=["linked_list"],
+            tags=["pointer"],
+            statement="给定单链表 head，反转链表并返回新的头节点。",
+            constraints=["节点数量范围为 0 到 5000"],
+            examples=[CodingProblemExample(input="head=[1,2,3]", output="[3,2,1]")],
+            starter_code={"python": "class Solution:\n    def reverseList(self, head):\n        pass\n"},
+        ),
+        CodingProblem(
+            id="stdin-sum",
+            title="多组输入求和",
+            difficulty="easy",
+            importance="normal",
+            answer_mode="acm",
+            topics=["io"],
+            statement="读取多组整数输入并输出每组和。",
+        ),
+    ])
+
+    r = await client.post(
+        "/api/coding-problems/search",
+        json={
+            "query": "链表 指针 反转",
+            "difficulty": ["easy"],
+            "importance": ["hot100"],
+            "answer_mode": ["core"],
+            "topics": ["linked_list"],
+            "top_k": 3,
+        },
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["problems"]) == 1
+    assert body["problems"][0]["id"] == "reverse-list"
+    assert body["problems"][0]["starter_code"]["python"].startswith("class Solution")
+
+
+async def test_search_coding_problems_excludes_ids(client):
+    api_module._coding_problem_store.import_problems([
+        CodingProblem(
+            id="two-sum",
+            title="两数之和",
+            difficulty="easy",
+            importance="hot100",
+            answer_mode="core",
+            topics=["array", "hash_table"],
+            statement="给定整数数组和目标值，返回两个数的下标。",
+        )
+    ])
+
+    r = await client.post(
+        "/api/coding-problems/search",
+        json={"query": "数组 哈希", "exclude_ids": ["two-sum"]},
+    )
+
+    assert r.status_code == 200
+    assert r.json() == {"problems": []}
+
+
+async def test_get_coding_problem(client):
+    api_module._coding_problem_store.import_problems([
+        CodingProblem(
+            id="reverse-list",
+            title="反转链表",
+            difficulty="easy",
+            importance="hot100",
+            answer_mode="core",
+            topics=["linked_list"],
+            statement="给定单链表 head，反转链表并返回新的头节点。",
+        )
+    ])
+
+    r = await client.get("/api/coding-problems/reverse-list")
+
+    assert r.status_code == 200
+    assert r.json()["problem"]["id"] == "reverse-list"
+
+
+async def test_get_coding_problem_not_found(client):
+    r = await client.get("/api/coding-problems/no-such-problem")
+
+    assert r.status_code == 404

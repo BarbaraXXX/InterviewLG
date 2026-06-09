@@ -16,6 +16,7 @@ _DATA_DIR = Path(os.getenv("VECTORDB_DATA_DIR", Path.cwd() / "data"))
 _PROFILES_DIR = _DATA_DIR / "profiles"
 _EXPERIENCES_DIR = _DATA_DIR / "experiences"
 _QUESTION_CARDS_DB_PATH = _DATA_DIR / "question_cards" / "question_cards.sqlite3"
+_CODING_PROBLEMS_DB_PATH = _DATA_DIR / "coding_problems" / "coding_problems.sqlite3"
 
 
 class ProfileDB:

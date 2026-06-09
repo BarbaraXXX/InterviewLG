@@ -6,10 +6,11 @@ from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
 from interview_vectordb.config import embedding_settings, security_settings
-from interview_vectordb.db import ProfileDB, _EXPERIENCES_DIR, _QUESTION_CARDS_DB_PATH
+from interview_vectordb.coding_problems import CodingProblemStore
+from interview_vectordb.db import ProfileDB, _CODING_PROBLEMS_DB_PATH, _EXPERIENCES_DIR, _QUESTION_CARDS_DB_PATH
 from interview_vectordb.embeddings import build_embedding_provider
 from interview_vectordb.question_cards import QuestionCardStore
-from interview_vectordb.schema import InterviewExperience, QuestionCardSearchRequest
+from interview_vectordb.schema import CodingProblemSearchRequest, InterviewExperience, QuestionCardSearchRequest
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ api_app.add_middleware(
 
 _db = ProfileDB()
 _question_card_store = QuestionCardStore(_QUESTION_CARDS_DB_PATH, build_embedding_provider(embedding_settings))
+_coding_problem_store = CodingProblemStore(_CODING_PROBLEMS_DB_PATH, build_embedding_provider(embedding_settings))
 
 _MAX_IMPORT_BATCH = 500
 _PATH_SEGMENT_RE = re.compile(r'^[\w\u4e00-\u9fff\s\-().&+,]+$')
@@ -153,3 +155,45 @@ async def question_cards_stats() -> dict:
         "count": _question_card_store.count(),
         "domains": _question_card_store.domain_counts(),
     }
+
+
+@api_app.post("/api/coding-problems/search")
+async def search_coding_problems(request: CodingProblemSearchRequest) -> dict:
+    logger.info(
+        "POST /api/coding-problems/search difficulty=%s importance=%s answer_mode=%s top_k=%d query_len=%d",
+        request.difficulty,
+        request.importance,
+        request.answer_mode,
+        request.top_k,
+        len(request.query),
+    )
+    problems = _coding_problem_store.search(
+        request.query,
+        difficulty=request.difficulty,
+        importance=request.importance,
+        answer_mode=request.answer_mode,
+        topics=request.topics,
+        exclude_ids=request.exclude_ids,
+        top_k=request.top_k,
+        min_score=request.min_score,
+    )
+    return {"problems": problems}
+
+
+@api_app.get("/api/coding-problems/stats")
+async def coding_problems_stats() -> dict:
+    logger.info("GET /api/coding-problems/stats")
+    return {
+        "count": _coding_problem_store.count(),
+        **_coding_problem_store.stats(),
+    }
+
+
+@api_app.get("/api/coding-problems/{problem_id}")
+async def get_coding_problem(problem_id: str) -> dict:
+    problem_id = _validate_path_segment(problem_id, "problem_id")
+    logger.info("GET /api/coding-problems/%s", problem_id)
+    problem = _coding_problem_store.get(problem_id)
+    if problem is None:
+        raise HTTPException(status_code=404, detail="Coding problem not found")
+    return {"problem": problem}

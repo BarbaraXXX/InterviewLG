@@ -55,6 +55,15 @@ def _build_question_card_store():
     return QuestionCardStore(_QUESTION_CARDS_DB_PATH, build_embedding_provider(embedding_settings))
 
 
+def _build_coding_problem_store():
+    from interview_vectordb.coding_problems import CodingProblemStore
+    from interview_vectordb.config import embedding_settings
+    from interview_vectordb.db import _CODING_PROBLEMS_DB_PATH
+    from interview_vectordb.embeddings import build_embedding_provider
+
+    return CodingProblemStore(_CODING_PROBLEMS_DB_PATH, build_embedding_provider(embedding_settings))
+
+
 def _import_question_cards(path: Path) -> None:
     from interview_vectordb.config import embedding_settings
     from interview_vectordb.question_cards import load_question_cards_from_path
@@ -78,10 +87,39 @@ def _import_question_cards(path: Path) -> None:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
 
 
+def _import_coding_problems(path: Path) -> None:
+    from interview_vectordb.coding_problems import load_coding_problems_from_path
+    from interview_vectordb.config import embedding_settings
+
+    problems = load_coding_problems_from_path(path)
+    store = _build_coding_problem_store()
+    stats = store.import_problems(problems, batch_size=embedding_settings.batch_size, replace=True)
+    payload = {
+        "embedding": {
+            "provider": embedding_settings.provider,
+            "base_url": embedding_settings.base_url,
+            "model": embedding_settings.model,
+            "dimensions": embedding_settings.dimensions,
+            "batch_size": embedding_settings.batch_size,
+            "external_api": embedding_settings.provider.strip().lower() not in {"deterministic", "fake", "local"},
+        },
+        "input_problems": len(problems),
+        **stats,
+        "total": store.count(),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
 def _search_question_cards(query: str, domain: list[str]) -> None:
     store = _build_question_card_store()
     cards = store.search(query, domain=domain, top_k=5)
     print(json.dumps({"cards": cards}, ensure_ascii=False, indent=2))
+
+
+def _search_coding_problems(query: str) -> None:
+    store = _build_coding_problem_store()
+    problems = store.search(query, top_k=5)
+    print(json.dumps({"problems": problems}, ensure_ascii=False, indent=2))
 
 
 def main() -> None:
@@ -121,11 +159,23 @@ def main() -> None:
             sys.exit(1)
         _import_question_cards(Path(sys.argv[2]))
 
+    elif cmd == "import-coding-problems":
+        if len(sys.argv) < 3:
+            print("Usage: interview-vectordb import-coding-problems <jsonl-file-or-directory>")
+            sys.exit(1)
+        _import_coding_problems(Path(sys.argv[2]))
+
     elif cmd == "search-cards":
         if len(sys.argv) < 3:
             print("Usage: interview-vectordb search-cards <query> [domain ...]")
             sys.exit(1)
         _search_question_cards(sys.argv[2], sys.argv[3:])
+
+    elif cmd == "search-coding-problems":
+        if len(sys.argv) < 3:
+            print("Usage: interview-vectordb search-coding-problems <query>")
+            sys.exit(1)
+        _search_coding_problems(sys.argv[2])
 
     elif cmd == "regen":
         db = ProfileDB()

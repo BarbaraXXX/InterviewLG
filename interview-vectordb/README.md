@@ -1,9 +1,10 @@
 # interview-vectordb
 
-面经偏好聚合与 QuestionCard RAG 服务。
+面经偏好聚合、QuestionCard RAG 与手撕题库检索服务。
 
 - 从非结构化面经中提取公司/岗位的面试风格 Profile，供 Agent 注入系统提示词。
 - 导入 RAG QuestionCard，生成 embedding，并提供语义检索 API，供 Agent 按需检索真实面试题参考。
+- 导入 CodingProblem，生成 embedding，并提供结构过滤 + 语义排序的手撕题库检索。
 
 ## 架构
 
@@ -11,18 +12,20 @@
 src/interview_vectordb/
   __main__.py     入口              REST + MCP 双模式服务
   cli.py          CLI               import / regen / list / profile 命令
-  api.py          REST API          FastAPI，6 个端点
+  api.py          REST API          FastAPI
   server.py       MCP Server        FastMCP，4 个工具
   db.py           ProfileDB         JSON 文件存储 + LLM 分层聚合
   question_cards.py QuestionCardStore SQLite 存储 + 向量检索
+  coding_problems.py CodingProblemStore SQLite 存储 + 向量检索
   embeddings.py   EmbeddingProvider  deterministic / OpenAI-compatible
-  schema.py       数据模型          InterviewExperience + InterviewProfile + QuestionCard
+  schema.py       数据模型          InterviewExperience + InterviewProfile + QuestionCard + CodingProblem
   config.py       配置               LLMSettings / EmbeddingSettings / MCPServerSettings
 
 data/
   experiences/    面经原始文件        {company}_{position}_{uuid}.json
   profiles/       聚合后的 Profile   {company}_{position}.json
   question_cards/ RAG SQLite         question_cards.sqlite3
+  coding_problems/ 手撕题库 SQLite    coding_problems.sqlite3
 ```
 
 ## 数据模型
@@ -56,6 +59,23 @@ answer_outline: list[str]
 followups: list[str]
 tags: list[str]
 difficulty: str
+source_url: str
+source_title: str
+```
+
+### CodingProblem（手撕题库输入）
+```python
+id: str
+title: str
+difficulty: str          # easy/medium/hard
+importance: str          # hot100/high/normal
+answer_mode: str         # core/acm
+topics: list[str]
+tags: list[str]
+statement: str
+constraints: list[str]
+examples: list[dict]     # input/output/explanation
+starter_code: dict[str, str]
 source_url: str
 source_title: str
 ```
@@ -124,6 +144,25 @@ uv run interview-vectordb import-cards ../rag-data-pipeline/data/output/question
 uv run interview-vectordb search-cards "redis zset 跳表" redis
 ```
 
+### CodingProblem 手撕题库
+
+本地无 key 验证使用 deterministic embedding：
+
+```bash
+EMBEDDING_PROVIDER=deterministic EMBEDDING_DIMENSIONS=64 \
+  uv run interview-vectordb import-coding-problems /path/to/coding-problems
+
+EMBEDDING_PROVIDER=deterministic EMBEDDING_DIMENSIONS=64 \
+  uv run interview-vectordb search-coding-problems "链表 指针 反转"
+```
+
+真实导入使用同一套 DashScope embedding 配置，然后执行：
+
+```bash
+uv run interview-vectordb import-coding-problems /path/to/coding-problems
+uv run interview-vectordb search-coding-problems "双指针 边界处理 medium"
+```
+
 ### .env 配置
 
 ```bash
@@ -153,6 +192,9 @@ EMBEDDING_BATCH_SIZE=10
 | `/api/experiences/import` | POST | 批量导入面经 |
 | `/api/question-cards/stats` | GET | QuestionCard 数量和 domain 统计 |
 | `/api/question-cards/search` | POST | 语义检索 QuestionCard |
+| `/api/coding-problems/stats` | GET | CodingProblem 数量和字段统计 |
+| `/api/coding-problems/search` | POST | 检索手撕题库 |
+| `/api/coding-problems/{problem_id}` | GET | 获取单道手撕题完整内容 |
 
 QuestionCard search 请求示例：
 
@@ -160,6 +202,21 @@ QuestionCard search 请求示例：
 {
   "query": "Redis zset 跳表底层实现",
   "domain": ["redis"],
+  "top_k": 5,
+  "min_score": 0.0
+}
+```
+
+CodingProblem search 请求示例：
+
+```json
+{
+  "query": "链表 指针 反转",
+  "difficulty": ["easy"],
+  "importance": ["hot100"],
+  "answer_mode": ["core"],
+  "topics": ["linked_list"],
+  "exclude_ids": [],
   "top_k": 5,
   "min_score": 0.0
 }

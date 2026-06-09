@@ -64,6 +64,8 @@ export interface CodingTask {
   submitted_code: string | null;
   revision_instruction: string;
   revision_count: number;
+  source_problem_id: string;
+  source_problem_title: string;
   status: 'active' | 'submitted';
   created_at: string;
   submitted_at: string | null;
