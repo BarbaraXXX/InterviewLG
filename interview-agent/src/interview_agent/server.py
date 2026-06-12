@@ -396,9 +396,24 @@ def _parse_json_list(value: str) -> list:
     return parsed if isinstance(parsed, list) else []
 
 
+def _parse_json_dict(value: str) -> dict:
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
 def _serialize_coding_task(task: dict | None) -> dict | None:
     if task is None:
         return None
+    starter_code_map = {
+        str(language): str(code)
+        for language, code in _parse_json_dict(str(task.get("starter_code_json", "{}"))).items()
+        if str(language).strip() and str(code).strip()
+    }
+    if task["starter_code"] and task["language"] not in starter_code_map:
+        starter_code_map[task["language"]] = task["starter_code"]
     return {
         "id": task["id"],
         "session_id": task["session_id"],
@@ -406,6 +421,7 @@ def _serialize_coding_task(task: dict | None) -> dict | None:
         "description": task["description"],
         "language": task["language"],
         "starter_code": task["starter_code"],
+        "starter_code_map": starter_code_map,
         "constraints": _parse_json_list(task["constraints_json"]),
         "examples": _parse_json_list(task["examples_json"]),
         "draft_language": task["draft_language"],

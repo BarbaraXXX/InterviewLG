@@ -22,7 +22,10 @@ async def test_create_coding_task_from_problem_records_source(isolate_env, monke
             "statement": "给定一个单链表头节点，请反转链表并返回新的头节点。",
             "constraints": ["链表长度范围为 0 到 5000"],
             "examples": [{"input": "head=[1,3,5]", "output": "[5,3,1]"}],
-            "starter_code": {"python": "class Solution:\n    def reverseList(self, head):\n        pass\n"},
+            "starter_code": {
+                "python": "class Solution:\n    def reverseList(self, head):\n        pass\n",
+                "cpp": "class Solution {\npublic:\n    ListNode* reverseList(ListNode* head) {\n        return nullptr;\n    }\n};\n",
+            },
         }
 
     monkeypatch.setattr(coding_tools_module, "get_coding_problem", fake_get_problem)
@@ -36,6 +39,9 @@ async def test_create_coding_task_from_problem_records_source(isolate_env, monke
     assert task["title"] == "反转链表"
     assert task["source_problem_id"] == "hot100_206"
     assert task["source_problem_title"] == "反转链表"
+    starter_code_map = json.loads(task["starter_code_json"])
+    assert "python" in starter_code_map
+    assert "cpp" in starter_code_map
 
 
 async def test_search_coding_problems_excludes_used_problem_ids(isolate_env, monkeypatch):

@@ -417,6 +417,13 @@ def test_coding_task_active_and_submit(auth_client):
           "class Solution:\n    pass",
           json.dumps(["只需要返回任意一种答案"], ensure_ascii=False),
           json.dumps([{"input": "nums=[2,7], target=9", "output": "[0,1]"}], ensure_ascii=False),
+          starter_code_json=json.dumps(
+              {
+                  "python": "class Solution:\n    pass",
+                  "cpp": "class Solution {\npublic:\n    vector<int> twoSum(vector<int>& nums, int target) {\n        return {};\n    }\n};",
+              },
+              ensure_ascii=False,
+          ),
       )
 
     anyio.run(seed)
@@ -425,6 +432,8 @@ def test_coding_task_active_and_submit(auth_client):
     assert active.status_code == 200
     task = active.json()["task"]
     assert task["title"] == "两数之和"
+    assert "python" in task["starter_code_map"]
+    assert "cpp" in task["starter_code_map"]
     assert task["constraints"] == ["只需要返回任意一种答案"]
     assert task["examples"][0]["output"] == "[0,1]"
 

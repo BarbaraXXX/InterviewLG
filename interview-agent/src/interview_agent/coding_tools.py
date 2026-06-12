@@ -54,6 +54,18 @@ def _clean_examples(examples: list[dict] | None) -> list[dict]:
     return cleaned
 
 
+def _clean_starter_code_map(starter_code: object) -> dict[str, str]:
+    if not isinstance(starter_code, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for language, code in starter_code.items():
+        clean_language = _clean_language(str(language))
+        clean_code = str(code or "").strip()[:_MAX_STARTER_CODE_LEN]
+        if clean_code:
+            cleaned[clean_language] = clean_code
+    return cleaned
+
+
 def build_coding_tools(session_id: str) -> list[BaseTool]:
     @tool
     async def search_coding_problems(
@@ -124,7 +136,7 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
             return json.dumps({"ok": False, "error": "题库中没有找到该手撕题。"}, ensure_ascii=False)
 
         clean_language = _clean_language(language)
-        starter_code_map = problem.get("starter_code") if isinstance(problem.get("starter_code"), dict) else {}
+        starter_code_map = _clean_starter_code_map(problem.get("starter_code"))
         starter_code = str(starter_code_map.get(clean_language) or starter_code_map.get("python") or "")[
             :_MAX_STARTER_CODE_LEN
         ]
@@ -142,6 +154,7 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
                 description=clean_description,
                 language=clean_language,
                 starter_code=starter_code,
+                starter_code_json=json.dumps(starter_code_map, ensure_ascii=False),
                 constraints_json=json.dumps(_clean_items(problem.get("constraints")), ensure_ascii=False),
                 examples_json=json.dumps(_clean_examples(problem.get("examples")), ensure_ascii=False),
                 source_problem_id=str(problem.get("id") or clean_problem_id)[:128],
@@ -191,6 +204,7 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
 
         clean_language = _clean_language(language)
         clean_starter_code = starter_code[:_MAX_STARTER_CODE_LEN]
+        starter_code_map = {clean_language: clean_starter_code} if clean_starter_code.strip() else {}
         task_id = uuid.uuid4().hex
         try:
             task = await db_create_coding_task(
@@ -200,6 +214,7 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
                 description=clean_description,
                 language=clean_language,
                 starter_code=clean_starter_code,
+                starter_code_json=json.dumps(starter_code_map, ensure_ascii=False),
                 constraints_json=json.dumps(_clean_items(constraints), ensure_ascii=False),
                 examples_json=json.dumps(_clean_examples(examples), ensure_ascii=False),
             )

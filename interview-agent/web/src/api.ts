@@ -56,6 +56,7 @@ export interface CodingTask {
   description: string;
   language: string;
   starter_code: string;
+  starter_code_map: Record<string, string>;
   constraints: string[];
   examples: CodingTaskExample[];
   draft_language: string | null;

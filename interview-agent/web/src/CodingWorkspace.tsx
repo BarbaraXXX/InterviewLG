@@ -23,6 +23,20 @@ function codingLanguageExtensions(language: string) {
   return [];
 }
 
+function starterCodeForLanguage(task: CodingTask, language: string): string {
+  const starterCodeMap = task.starter_code_map || {};
+  if (starterCodeMap[language]) return starterCodeMap[language];
+  if (Object.keys(starterCodeMap).length === 0) return task.starter_code || '';
+  return language === task.language ? task.starter_code || '' : '';
+}
+
+function isStarterTemplate(task: CodingTask, code: string): boolean {
+  if (!code.trim()) return true;
+  const templates = new Set(Object.values(task.starter_code_map || {}).filter(Boolean));
+  if (task.starter_code) templates.add(task.starter_code);
+  return templates.has(code);
+}
+
 export default function CodingWorkspace({
   task,
   theme,
@@ -38,8 +52,8 @@ export default function CodingWorkspace({
     ? task.submitted_language || task.draft_language || task.language || 'python'
     : task.draft_language || task.submitted_language || task.language || 'python';
   const initialCode = isSubmitted
-    ? task.submitted_code || task.draft_code || task.starter_code || ''
-    : task.draft_code || task.submitted_code || task.starter_code || '';
+    ? task.submitted_code || task.draft_code || starterCodeForLanguage(task, initialLanguage)
+    : task.draft_code || task.submitted_code || starterCodeForLanguage(task, initialLanguage);
   const [language, setLanguage] = useState(initialLanguage);
   const [code, setCode] = useState(initialCode);
   const [submitting, setSubmitting] = useState(false);
@@ -48,6 +62,14 @@ export default function CodingWorkspace({
   const [error, setError] = useState('');
   const [savedDraftKey, setSavedDraftKey] = useState(`${initialLanguage}\n${initialCode}`);
   const draftKey = useMemo(() => `${language}\n${code}`, [code, language]);
+
+  const handleLanguageChange = (nextLanguage: string) => {
+    const shouldReplaceTemplate = isStarterTemplate(task, code);
+    setLanguage(nextLanguage);
+    if (shouldReplaceTemplate) {
+      setCode(starterCodeForLanguage(task, nextLanguage));
+    }
+  };
 
   const saveDraft = useCallback(async (silent = false) => {
     if (isSubmitted || savingDraft || draftKey === savedDraftKey) return;
@@ -145,7 +167,7 @@ export default function CodingWorkspace({
                 className="custom-input profile-select"
                 value={language}
                 disabled={isSubmitted}
-                onChange={(e) => setLanguage(e.target.value)}
+                onChange={(e) => handleLanguageChange(e.target.value)}
               >
                 {CODING_LANGUAGE_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>{option.label}</option>
@@ -154,7 +176,7 @@ export default function CodingWorkspace({
             </label>
             <button
               className="secondary-button"
-              onClick={() => setCode(task.starter_code || '')}
+              onClick={() => setCode(starterCodeForLanguage(task, language))}
               disabled={isSubmitted || submitting || savingDraft}
             >
               重置模板
