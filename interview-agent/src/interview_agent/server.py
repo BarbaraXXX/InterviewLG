@@ -961,7 +961,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
     async def event_generator():
         full_content = ""
         async for event in ses.agent.astream_events(
-            {"messages": agent_input.messages},
+            {"agent_input": agent_input, "messages": agent_input.messages},
             version="v2",
         ):
             kind = event.get("event")

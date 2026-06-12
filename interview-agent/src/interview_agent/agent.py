@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
+from interview_agent.context import AgentInput
 from interview_agent.config import LLMProviderConfig, llm_settings
 from interview_agent.coding_tools import build_coding_tools
 from interview_agent.mcp_client import get_mcp_tools
@@ -28,13 +29,52 @@ def _create_llm(tools: list, provider: LLMProviderConfig) -> ChatOpenAI:
     return llm
 
 
-def _llm_call(state: MessagesState, *, llm: ChatOpenAI, system_prompt: str) -> dict:
+class InterviewGraphState(MessagesState, total=False):
+    agent_input: AgentInput
+    stage: str
+    control_actions: tuple[str, ...]
+    context_sections: dict[str, str]
+
+
+def _prepare_context(state: InterviewGraphState) -> dict:
+    agent_input = state.get("agent_input")
+    messages = agent_input.messages if agent_input is not None else state.get("messages", [])
+    context_sections = {}
+    if agent_input is not None:
+        context_sections = {
+            "state": agent_input.state_context,
+            "running_summary": agent_input.running_summary_context,
+            "user_memory": agent_input.user_memory_context,
+            "session_memory": agent_input.memory_context,
+            "stage_control": agent_input.stage_control_context,
+            "rag": agent_input.rag_context,
+        }
+    logger.debug(
+        "graph prepare_context messages=%d sections=%s",
+        len(messages),
+        ",".join(key for key, value in context_sections.items() if value),
+    )
+    return {"messages": messages, "context_sections": context_sections}
+
+
+def _route_turn(state: InterviewGraphState) -> dict:
+    agent_input = state.get("agent_input")
+    stage = "unknown"
+    actions: tuple[str, ...] = ()
+    if agent_input is not None and agent_input.stage_control_context:
+        stage = "controlled"
+        actions = ("follow_stage_control",)
+    logger.debug("graph route_turn stage=%s actions=%s", stage, actions)
+    return {"stage": stage, "control_actions": actions}
+
+
+def _llm_call(state: InterviewGraphState, *, llm: ChatOpenAI, system_prompt: str) -> dict:
     system = SystemMessage(content=system_prompt)
-    response = llm.invoke([system] + state["messages"])
+    response = llm.invoke([system] + state.get("messages", []))
     return {"messages": [response]}
 
 
-def _should_continue(state: MessagesState) -> Literal["tools", END]:
+def _should_continue(state: InterviewGraphState) -> Literal["tools", END]:
     return tools_condition(state)
 
 
@@ -55,7 +95,10 @@ async def build_interview_agent(
     llm = _create_llm(tools, provider)
     system_prompt = build_system_prompt(domain, difficulty, structured_jd, structured_profile)
 
-    graph = StateGraph(MessagesState)
+    graph = StateGraph(InterviewGraphState)
+
+    graph.add_node("prepare_context", _prepare_context)
+    graph.add_node("route_turn", _route_turn)
 
     graph.add_node(
         "interviewer",
@@ -69,6 +112,8 @@ async def build_interview_agent(
     else:
         graph.add_edge("interviewer", END)
 
-    graph.add_edge(START, "interviewer")
+    graph.add_edge(START, "prepare_context")
+    graph.add_edge("prepare_context", "route_turn")
+    graph.add_edge("route_turn", "interviewer")
 
     return graph.compile()
