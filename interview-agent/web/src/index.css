@@ -2713,7 +2713,8 @@ body {
 .markdown-content ul,
 .markdown-content ol,
 .markdown-content pre,
-.markdown-content blockquote {
+.markdown-content blockquote,
+.markdown-content table {
   margin: 0;
 }
 
@@ -2729,6 +2730,18 @@ body {
 
 .markdown-content li + li {
   margin-top: var(--space-1);
+}
+
+.markdown-content li:has(input[type='checkbox']) {
+  list-style: none;
+}
+
+.markdown-content input[type='checkbox'] {
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.45em 0 -1.15em;
+  accent-color: var(--color-accent);
+  vertical-align: -0.12em;
 }
 
 .markdown-content code {
@@ -2762,6 +2775,45 @@ body {
   background: transparent;
   border: 0;
   white-space: pre;
+}
+
+.markdown-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--color-border-subtle);
+  vertical-align: top;
+  white-space: nowrap;
+}
+
+.markdown-content th {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  font-weight: 800;
+}
+
+.markdown-content del {
+  color: var(--color-text-muted);
+}
+
+.markdown-content .katex-display {
+  max-width: 100%;
+  margin: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: var(--space-1) 0;
+}
+
+.markdown-content .katex {
+  font-size: 1.02em;
 }
 
 .markdown-content blockquote {
