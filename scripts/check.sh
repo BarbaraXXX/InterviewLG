@@ -2,7 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/interviewlg-uv-cache}"
+
+if [[ "${ISOLATED_UV_CACHE:-0}" == "1" ]]; then
+  export UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/interviewlg-uv-cache}"
+fi
 
 run_python_checks() {
   local project="$1"

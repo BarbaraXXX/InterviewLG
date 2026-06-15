@@ -35,7 +35,7 @@ interviewLG/
 
 ### 前置条件
 
-- Python 3.11+, uv, Node.js 18+
+- Python 3.12+, uv, Node.js 22.13+
 - DeepSeek API Key（或其他 OpenAI 兼容 API）
 
 ### 1. 配置 .env

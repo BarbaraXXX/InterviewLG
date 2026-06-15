@@ -56,7 +56,7 @@ interview-tester/
 
 ### 前置条件
 
-- Python 3.11+
+- Python 3.12+
 - [uv](https://github.com/astral-sh/uv) 包管理器
 - 有效的 LLM API Key（配置在 `../interview-agent/.env`）
 

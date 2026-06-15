@@ -2,7 +2,7 @@
 name = "interview-tester"
 version = "1.2.0"
 description = "Test agent for interviewing the interview simulation Agent"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "interview-agent",
     "langchain-openai>=0.3.0",

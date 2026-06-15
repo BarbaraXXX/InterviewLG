@@ -3,7 +3,11 @@
 data/
 .DS_Store
 *.log
-docs/
+docs/*
+!docs/
+!docs/git-version-history.md
+!docs/release-checklist.md
+!docs/code-style.md
 
 # Python
 __pycache__/

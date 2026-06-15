@@ -6,7 +6,11 @@ This project keeps checks lightweight because the deployed server is small and t
 
 - Python projects use `uv`, `pytest`, and `ruff`.
 - The web app uses `npm`, TypeScript, ESLint, Vite, and Prettier.
-- Recommended Node.js versions for frontend development: `20.19+`, `22.13+`, or `24+`.
+- Python runtime baseline: `3.12`. Docker and CI should stay aligned with this version.
+- Recommended Node.js version for frontend development: `22.13+`.
+- Release checklist: `docs/release-checklist.md`.
+- Code style details: `docs/code-style.md`.
+- Git/version change log: `docs/git-version-history.md`.
 
 ## Before Changing Code
 
@@ -53,6 +57,12 @@ From the repository root:
 
 ```bash
 bash scripts/check.sh
+```
+
+Use an isolated uv cache only when the default user cache is not accessible:
+
+```bash
+ISOLATED_UV_CACHE=1 bash scripts/check.sh
 ```
 
 Set `CHECK_FORMAT=1` only after running the dedicated formatter for the touched area:
