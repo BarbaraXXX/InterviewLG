@@ -1,8 +1,8 @@
-from langchain_core.messages import BaseMessage, SystemMessage
-from langchain_openai import ChatOpenAI
 import logging
 
 from interview_agent.config import llm_settings
+from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
 from .config import test_settings
 

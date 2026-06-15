@@ -2,10 +2,9 @@ import json
 import logging
 import re
 
-from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_openai import ChatOpenAI
-
 from interview_agent.config import llm_settings
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 
 from .config import test_settings
 from .schemas import Evaluation, TestSession

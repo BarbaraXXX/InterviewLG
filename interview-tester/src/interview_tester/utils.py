@@ -1,8 +1,7 @@
+import logging
 from urllib.parse import quote
 
 import httpx
-import logging
-
 from interview_agent.config import vectordb_settings
 
 logger = logging.getLogger(__name__)

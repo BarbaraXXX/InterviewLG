@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, develop]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, develop]
 
 env:
   PYTHON_VERSION: "3.11"
@@ -116,3 +116,28 @@ jobs:
           name: coverage-tester
           path: interview-tester/coverage.xml
           if-no-files-found: ignore
+
+  test-web:
+    name: interview-agent web (lint + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: interview-agent/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13"
+          cache: npm
+          cache-dependency-path: interview-agent/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build

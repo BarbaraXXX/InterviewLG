@@ -5,9 +5,9 @@ import re
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
-from interview_vectordb.config import embedding_settings, security_settings
 from interview_vectordb.coding_problems import CodingProblemStore
-from interview_vectordb.db import ProfileDB, _CODING_PROBLEMS_DB_PATH, _EXPERIENCES_DIR, _QUESTION_CARDS_DB_PATH
+from interview_vectordb.config import embedding_settings, security_settings
+from interview_vectordb.db import _CODING_PROBLEMS_DB_PATH, _EXPERIENCES_DIR, _QUESTION_CARDS_DB_PATH, ProfileDB
 from interview_vectordb.embeddings import build_embedding_provider
 from interview_vectordb.question_cards import QuestionCardStore
 from interview_vectordb.schema import CodingProblemSearchRequest, InterviewExperience, QuestionCardSearchRequest

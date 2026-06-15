@@ -117,6 +117,7 @@ async def test_get_current_user_deleted_user(isolate_env):
     assert user is not None
     # User deletion is not a product API yet; delete directly for token validation coverage.
     import aiosqlite
+
     from interview_agent import db as db_module
 
     conn = await aiosqlite.connect(str(db_module._DB_PATH))

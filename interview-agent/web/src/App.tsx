@@ -1998,8 +1998,27 @@ function ChatView({
   }, [sessionId]);
 
   useEffect(() => {
-    void refreshContextUsage();
-  }, [refreshContextUsage]);
+    let isActive = true;
+
+    async function loadContextUsage() {
+      try {
+        const usage = await fetchContextUsage(sessionId);
+        if (isActive) {
+          setContextUsage(usage);
+        }
+      } catch {
+        if (isActive) {
+          setContextUsage(null);
+        }
+      }
+    }
+
+    void loadContextUsage();
+
+    return () => {
+      isActive = false;
+    };
+  }, [sessionId]);
 
   useEffect(() => () => {
     if (autoEndTimerRef.current !== null) {

@@ -11,16 +11,19 @@ from interview_agent.auth import get_current_user
 from interview_agent.db import (
     create_coding_task,
     create_message,
-    create_resume as db_create_resume,
-    create_session as db_create_session,
     create_user,
     get_session,
     init_db,
     request_latest_coding_task_revision,
     update_session_status,
 )
+from interview_agent.db import (
+    create_resume as db_create_resume,
+)
+from interview_agent.db import (
+    create_session as db_create_session,
+)
 from interview_agent.jd_parser import StructuredJD
-
 
 RESUME_PROJECTS = [{"name": "订单系统", "description": "负责缓存和接口设计"}]
 
@@ -574,8 +577,9 @@ def test_pause_session_marks_paused(auth_client):
 
 
 def test_resume_session_returns_messages(auth_client, monkeypatch):
-    import anyio
     from unittest.mock import MagicMock
+
+    import anyio
 
     async def fake_build(*args, **kwargs):
       return MagicMock()

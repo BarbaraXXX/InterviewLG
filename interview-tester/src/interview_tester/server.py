@@ -7,12 +7,11 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
-from langchain_core.messages import AIMessage, HumanMessage
-from pydantic import BaseModel
-
 from interview_agent.agent import build_interview_agent
 from interview_agent.config import llm_settings, vectordb_settings
 from interview_agent.jd_parser import parse_jd
+from langchain_core.messages import AIMessage, HumanMessage
+from pydantic import BaseModel
 
 from .candidate import build_candidate_llm, generate_candidate_response, get_candidate_system_prompt
 from .config import test_settings
@@ -20,8 +19,8 @@ from .evaluator import evaluate_session
 from .logging_config import setup_logging
 from .recorder import SessionRecorder
 from .schemas import QAPair, TestConfig, TestSession
-from .suite import load_suite, resolve_suite, suite_test_config_to_test_config, compute_summary
-from .utils import is_interview_ending, format_jd, fetch_profile
+from .suite import compute_summary, load_suite, resolve_suite, suite_test_config_to_test_config
+from .utils import fetch_profile, format_jd, is_interview_ending
 
 _STATIC_DIR = Path(__file__).resolve().parent.parent.parent / "web"
 _SUITES_DIR = Path(__file__).resolve().parent.parent.parent / "suites"
