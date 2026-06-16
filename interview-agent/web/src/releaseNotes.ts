@@ -10,6 +10,26 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    date: '2026-06-16',
+    title: '工程规范与渲染增强',
+    items: [
+      '聊天、代码题和历史记录的 Markdown 展示进一步增强，支持数学公式、表格、任务列表和删除线等内容。',
+      'Agent 内部图结构增加上下文准备和流程路由节点，为后续阶段控制、记忆管理和工具调度提供更稳定的基础。',
+      '手撕平台修复多语言 starter code 切换问题，切换语言时会加载对应模板，并避免误覆盖已经编辑的代码。',
+      '新增轻量代码规范、发布检查清单和版本提交记录，后续迭代更容易检查、部署和复盘。',
+    ],
+    sections: [
+      {
+        title: '规范化内容',
+        items: [
+          '统一 Python 基线到 3.12，前端推荐 Node 22.13+。',
+          '新增统一检查脚本，覆盖 Python lint/test 和前端 lint/build。',
+          '新增代码规范、发布清单和 Git 版本提交记录文档。',
+        ],
+      },
+    ],
+  },
+  {
     date: '2026-06-12',
     title: 'Agent 图结构与流程编排',
     items: [
