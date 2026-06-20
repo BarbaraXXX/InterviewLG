@@ -53,11 +53,19 @@ interface Message {
 const AUTH_SESSION_KEY = 'interviewlg_active_session';
 const HISTORY_NOTICE_DISMISSED_KEY = 'interviewlg_history_notice_dismissed';
 const THEME_STORAGE_KEY = 'interviewlg_theme';
+const SPEECH_DEVICE_STORAGE_KEY = 'interviewlg_speech_device_id';
 const HISTORY_WARNING_THRESHOLD = 45;
 const INTERVIEW_END_PHRASE = '本次面试到此结束';
 const AUTO_END_DELAY_MS = 10000;
 const AUTO_END_NOTICE_MS = 5000;
 const MAX_SPEECH_RECORDING_MS = 120000;
+const SPEECH_SIGNAL_RMS_THRESHOLD = 0.018;
+const SPEECH_MIN_ACTIVE_MS = 250;
+const SPEECH_METER_UI_INTERVAL_MS = 100;
+
+type BrowserWindowWithAudioContext = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
 
 function getInitialTheme(): ThemeMode {
   try {
@@ -81,6 +89,30 @@ function persistTheme(theme: ThemeMode): void {
   } catch {
     // Theme still applies for the current page if storage is unavailable.
   }
+}
+
+function getSavedSpeechDeviceId(): string {
+  try {
+    return localStorage.getItem(SPEECH_DEVICE_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function persistSpeechDeviceId(deviceId: string): void {
+  try {
+    if (deviceId) {
+      localStorage.setItem(SPEECH_DEVICE_STORAGE_KEY, deviceId);
+    } else {
+      localStorage.removeItem(SPEECH_DEVICE_STORAGE_KEY);
+    }
+  } catch {
+    // Device selection still applies for the current page if storage is unavailable.
+  }
+}
+
+function getSpeechDeviceDisplayName(device: MediaDeviceInfo, index: number): string {
+  return device.label || `麦克风 ${index + 1}`;
 }
 
 function formatSpeechRecordingTime(seconds: number): string {
@@ -1988,6 +2020,12 @@ function ChatView({
   const [speechState, setSpeechState] = useState<SpeechInputState>('idle');
   const [speechError, setSpeechError] = useState('');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [speechVolume, setSpeechVolume] = useState(0);
+  const [hasSpeechSignal, setHasSpeechSignal] = useState(false);
+  const [speechDevices, setSpeechDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedSpeechDeviceId, setSelectedSpeechDeviceId] = useState(() => getSavedSpeechDeviceId());
+  const [currentSpeechDeviceLabel, setCurrentSpeechDeviceLabel] = useState('');
+  const [isRefreshingSpeechDevices, setIsRefreshingSpeechDevices] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoEndTimerRef = useRef<number | null>(null);
@@ -1996,6 +2034,12 @@ function ChatView({
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingStartedAtRef = useRef(0);
   const recordingTimerRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const speechMeterFrameRef = useRef<number | null>(null);
+  const speechMaxVolumeRef = useRef(0);
+  const speechActiveMsRef = useRef(0);
+  const speechMeterLastSampleAtRef = useRef(0);
+  const speechMeterLastUiAtRef = useRef(0);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2037,6 +2081,51 @@ function ChatView({
     };
   }, [sessionId]);
 
+  const refreshSpeechDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    setIsRefreshingSpeechDevices(true);
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter((device) => device.kind === 'audioinput');
+      setSpeechDevices(audioInputs);
+      setSelectedSpeechDeviceId((currentDeviceId) => {
+        if (!currentDeviceId || audioInputs.some((device) => device.deviceId === currentDeviceId)) {
+          return currentDeviceId;
+        }
+        persistSpeechDeviceId('');
+        return '';
+      });
+    } catch {
+      setSpeechError('无法读取麦克风设备列表，请检查浏览器权限。');
+    } finally {
+      setIsRefreshingSpeechDevices(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const mediaDevices = navigator.mediaDevices;
+    if (!mediaDevices?.addEventListener) return undefined;
+    const handleDeviceChange = () => {
+      void refreshSpeechDevices();
+    };
+    mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    return () => {
+      mediaDevices.removeEventListener('devicechange', handleDeviceChange);
+    };
+  }, [refreshSpeechDevices]);
+
+  const cleanupSpeechMeter = useCallback(() => {
+    if (speechMeterFrameRef.current !== null) {
+      window.cancelAnimationFrame(speechMeterFrameRef.current);
+      speechMeterFrameRef.current = null;
+    }
+    const audioContext = audioContextRef.current;
+    audioContextRef.current = null;
+    if (audioContext && audioContext.state !== 'closed') {
+      void audioContext.close().catch(() => undefined);
+    }
+  }, []);
+
   useEffect(() => () => {
     if (autoEndTimerRef.current !== null) {
       window.clearTimeout(autoEndTimerRef.current);
@@ -2047,8 +2136,9 @@ function ChatView({
     if (recordingTimerRef.current !== null) {
       window.clearInterval(recordingTimerRef.current);
     }
+    cleanupSpeechMeter();
     mediaRecorderRef.current?.stream.getTracks().forEach((track) => track.stop());
-  }, []);
+  }, [cleanupSpeechMeter]);
 
   const refreshCodingTask = useCallback(async () => {
     try {
@@ -2140,6 +2230,58 @@ function ChatView({
     abortRef.current = controller;
   }, [autoEnded, isStreaming, refreshCodingTask, refreshContextUsage, scheduleAutoEnd, sessionId]);
 
+  const startSpeechMeter = useCallback((stream: MediaStream) => {
+    cleanupSpeechMeter();
+    speechMaxVolumeRef.current = 0;
+    speechActiveMsRef.current = 0;
+    speechMeterLastSampleAtRef.current = 0;
+    speechMeterLastUiAtRef.current = 0;
+    setSpeechVolume(0);
+    setHasSpeechSignal(false);
+
+    const AudioContextConstructor = window.AudioContext || (window as BrowserWindowWithAudioContext).webkitAudioContext;
+    if (!AudioContextConstructor) return;
+
+    try {
+      const audioContext = new AudioContextConstructor();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 1024;
+      source.connect(analyser);
+      audioContextRef.current = audioContext;
+      void audioContext.resume().catch(() => undefined);
+
+      const samples = new Uint8Array(analyser.fftSize);
+      const sample = (timestamp: number) => {
+        analyser.getByteTimeDomainData(samples);
+        let squareSum = 0;
+        for (const value of samples) {
+          const centered = (value - 128) / 128;
+          squareSum += centered * centered;
+        }
+        const rms = Math.sqrt(squareSum / samples.length);
+        const previousSampleAt = speechMeterLastSampleAtRef.current || timestamp;
+        const elapsedMs = Math.max(0, timestamp - previousSampleAt);
+        speechMeterLastSampleAtRef.current = timestamp;
+        speechMaxVolumeRef.current = Math.max(speechMaxVolumeRef.current, rms);
+        if (rms >= SPEECH_SIGNAL_RMS_THRESHOLD) {
+          speechActiveMsRef.current += elapsedMs;
+        }
+
+        if (timestamp - speechMeterLastUiAtRef.current >= SPEECH_METER_UI_INTERVAL_MS) {
+          speechMeterLastUiAtRef.current = timestamp;
+          setSpeechVolume(Math.min(100, Math.round(rms * 520)));
+          setHasSpeechSignal(speechActiveMsRef.current >= SPEECH_MIN_ACTIVE_MS);
+        }
+        speechMeterFrameRef.current = window.requestAnimationFrame(sample);
+      };
+
+      speechMeterFrameRef.current = window.requestAnimationFrame(sample);
+    } catch {
+      cleanupSpeechMeter();
+    }
+  }, [cleanupSpeechMeter]);
+
   const finalizeSpeechRecording = useCallback(async () => {
     if (recordingTimerRef.current !== null) {
       window.clearInterval(recordingTimerRef.current);
@@ -2147,17 +2289,28 @@ function ChatView({
     }
     const recorder = mediaRecorderRef.current;
     const chunks = audioChunksRef.current;
+    const activeSpeechMs = speechActiveMsRef.current;
+    const maxVolume = speechMaxVolumeRef.current;
     mediaRecorderRef.current = null;
     audioChunksRef.current = [];
+    cleanupSpeechMeter();
     recorder?.stream.getTracks().forEach((track) => track.stop());
 
     const durationMs = recordingStartedAtRef.current > 0 ? Date.now() - recordingStartedAtRef.current : 0;
     recordingStartedAtRef.current = 0;
     setRecordingSeconds(0);
+    setSpeechVolume(0);
+    setHasSpeechSignal(false);
 
     if (chunks.length === 0) {
       setSpeechState('idle');
       setSpeechError('没有录到有效语音，请重试。');
+      return;
+    }
+
+    if (durationMs >= 1200 && (activeSpeechMs < SPEECH_MIN_ACTIVE_MS || maxVolume < SPEECH_SIGNAL_RMS_THRESHOLD)) {
+      setSpeechState('idle');
+      setSpeechError('没有检测到麦克风声音，请检查浏览器输入设备或系统麦克风音量。');
       return;
     }
 
@@ -2188,7 +2341,7 @@ function ChatView({
     } finally {
       setSpeechState('idle');
     }
-  }, []);
+  }, [cleanupSpeechMeter]);
 
   const stopSpeechRecording = useCallback(() => {
     const recorder = mediaRecorderRef.current;
@@ -2206,16 +2359,48 @@ function ChatView({
     }
     setSpeechError('');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const audioConstraints: MediaTrackConstraints = selectedSpeechDeviceId
+        ? {
+            deviceId: { exact: selectedSpeechDeviceId },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          }
+        : {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          };
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints });
       const preferredMimeType = [
-        'audio/mp4',
         'audio/webm;codecs=opus',
         'audio/webm',
+        'audio/mp4',
       ].find((type) => MediaRecorder.isTypeSupported(type));
       const recorder = new MediaRecorder(stream, preferredMimeType ? { mimeType: preferredMimeType } : undefined);
+      const [audioTrack] = stream.getAudioTracks();
+      if (!audioTrack || audioTrack.readyState === 'ended') {
+        stream.getTracks().forEach((track) => track.stop());
+        setSpeechState('idle');
+        setSpeechError('没有可用的麦克风输入，请检查浏览器输入设备。');
+        return;
+      }
+      const selectedDevice = speechDevices.find((device) => device.deviceId === selectedSpeechDeviceId);
+      setCurrentSpeechDeviceLabel(audioTrack.label || selectedDevice?.label || (selectedSpeechDeviceId ? '已选择的麦克风' : '浏览器默认麦克风'));
+      audioTrack.onmute = () => {
+        setSpeechError('麦克风输入暂时没有声音，请检查系统输入设备。');
+      };
+      audioTrack.onunmute = () => {
+        setSpeechError('');
+      };
+      audioTrack.onended = () => {
+        setSpeechError('麦克风输入已断开，请重新开始录音。');
+        stopSpeechRecording();
+      };
       mediaRecorderRef.current = recorder;
       audioChunksRef.current = [];
       recordingStartedAtRef.current = Date.now();
+      startSpeechMeter(stream);
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -2233,6 +2418,7 @@ function ChatView({
       recorder.start();
       setSpeechState('recording');
       setRecordingSeconds(0);
+      void refreshSpeechDevices();
       recordingTimerRef.current = window.setInterval(() => {
         const elapsedMs = Date.now() - recordingStartedAtRef.current;
         setRecordingSeconds(Math.floor(elapsedMs / 1000));
@@ -2242,9 +2428,12 @@ function ChatView({
       }, 500);
     } catch {
       setSpeechState('idle');
-      setSpeechError('无法访问麦克风，请检查浏览器权限后重试。');
+      setSpeechError(selectedSpeechDeviceId
+        ? '无法使用所选麦克风，请刷新设备列表或改选其他输入设备。'
+        : '无法访问麦克风，请检查浏览器权限后重试。');
+      void refreshSpeechDevices();
     }
-  }, [finalizeSpeechRecording, stopSpeechRecording]);
+  }, [finalizeSpeechRecording, refreshSpeechDevices, selectedSpeechDeviceId, speechDevices, startSpeechMeter, stopSpeechRecording]);
 
   const handleSpeechToggle = () => {
     if (speechState === 'recording') {
@@ -2254,6 +2443,13 @@ function ChatView({
     if (speechState === 'idle') {
       void startSpeechRecording();
     }
+  };
+
+  const handleSpeechDeviceChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const deviceId = event.target.value;
+    setSelectedSpeechDeviceId(deviceId);
+    persistSpeechDeviceId(deviceId);
+    setSpeechError('');
   };
 
   const handleSend = () => {
@@ -2297,6 +2493,19 @@ function ChatView({
   };
 
   const diffLabel = getInterviewTargetLabel(difficulty);
+  const selectedSpeechDeviceName = selectedSpeechDeviceId
+    ? speechDevices.find((device) => device.deviceId === selectedSpeechDeviceId)?.label || '已选择的麦克风'
+    : '浏览器默认麦克风';
+  const speechHintText = speechError ||
+    (speechState === 'uploading'
+      ? '正在转写语音，完成后会填入输入框。'
+      : '可使用语音转写为文本，发送前请检查内容；请勿输入身份证号、手机号等敏感信息。');
+  const speechSignalText = speechError || (hasSpeechSignal
+    ? '已检测到麦克风输入'
+    : recordingSeconds >= 2
+      ? '未检测到明显声音，请检查麦克风或系统输入设备'
+      : '请对准麦克风正常说话');
+  const speechSignalClassName = speechError ? 'speech-signal-error' : hasSpeechSignal ? 'speech-signal-ok' : 'speech-signal-waiting';
 
   return (
     <div className={`chat-view ${codingTask ? 'with-coding' : ''}`}>
@@ -2393,13 +2602,59 @@ function ChatView({
               </svg>
             </button>
           </div>
-          <div className={`speech-input-hint ${speechError ? 'error' : ''}`} role="status">
-            {speechError ||
-              (speechState === 'recording'
-                ? `正在录音 ${formatSpeechRecordingTime(recordingSeconds)}，再次点击麦克风停止并转写。`
-                : speechState === 'uploading'
-                  ? '正在转写语音，完成后会填入输入框。'
-                  : '可使用语音转写为文本，发送前请检查内容；请勿输入身份证号、手机号等敏感信息。')}
+          <div className="speech-device-row">
+            <label htmlFor="speech-device-select">麦克风</label>
+            <div className="speech-device-control">
+              <select
+                id="speech-device-select"
+                className="speech-device-select"
+                value={selectedSpeechDeviceId}
+                onChange={handleSpeechDeviceChange}
+                onFocus={() => void refreshSpeechDevices()}
+                disabled={speechState !== 'idle' || isStreaming || autoEnded}
+                aria-label="选择麦克风输入设备"
+              >
+                <option value="">浏览器默认麦克风</option>
+                {speechDevices.map((device, index) => (
+                  <option key={device.deviceId || `speech-device-${index}`} value={device.deviceId}>
+                    {getSpeechDeviceDisplayName(device, index)}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="speech-device-refresh"
+                onClick={() => void refreshSpeechDevices()}
+                disabled={speechState !== 'idle' || isRefreshingSpeechDevices}
+                title="刷新麦克风列表"
+                aria-label="刷新麦克风列表"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 0 1-15.3 6.4" />
+                  <path d="M3 12A9 9 0 0 1 18.3 5.6" />
+                  <path d="M18 2v4h-4" />
+                  <path d="M6 22v-4h4" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div className={`speech-input-hint ${speechError ? 'error' : ''} ${speechState === 'recording' ? 'recording' : ''}`} role="status">
+            {speechState === 'recording' ? (
+              <div className="speech-meter-panel">
+                <div className="speech-meter-header">
+                  <span>正在录音 {formatSpeechRecordingTime(recordingSeconds)}</span>
+                  <span className={speechSignalClassName}>{speechSignalText}</span>
+                </div>
+                <div className="speech-meter-track" aria-label="麦克风输入音量">
+                  <div className="speech-meter-fill" style={{ width: `${speechVolume}%` }} />
+                </div>
+                <div className="speech-meter-footer">
+                  当前麦克风：{currentSpeechDeviceLabel || selectedSpeechDeviceName}。再次点击麦克风停止并转写。
+                </div>
+              </div>
+            ) : (
+              speechHintText
+            )}
           </div>
         </section>
         {codingTask && (
