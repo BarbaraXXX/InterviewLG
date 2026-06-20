@@ -2451,6 +2451,10 @@ body {
   line-height: 1.35;
 }
 
+.coding-mobile-tabs {
+  display: none;
+}
+
 .coding-status {
   min-height: 28px;
   padding: 2px var(--space-3);
@@ -3774,8 +3778,85 @@ body {
     flex-direction: column;
   }
 
+  .coding-workspace {
+    --coding-editor-height: min(420px, 52dvh);
+    padding: var(--space-3);
+    gap: var(--space-3);
+  }
+
+  .coding-mobile-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-2);
+    padding: 3px;
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+  }
+
+  .coding-mobile-tabs button {
+    min-height: 40px;
+    color: var(--color-text-secondary);
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-sans);
+    font-size: 0.82rem;
+    font-weight: 800;
+  }
+
+  .coding-mobile-tabs button.active {
+    color: var(--color-on-accent);
+    background: var(--color-accent);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .coding-mobile-tabs button:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  .coding-task-body {
+    min-height: 0;
+    gap: var(--space-3);
+  }
+
+  .coding-pane {
+    display: none;
+  }
+
+  .coding-pane.active {
+    display: flex;
+  }
+
+  .coding-problem.coding-pane.active {
+    max-height: min(560px, 58dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .coding-editor-panel.coding-pane.active {
+    min-height: 0;
+  }
+
   .coding-editor-toolbar label {
     min-width: 0;
+  }
+
+  .coding-editor-toolbar .secondary-button {
+    min-height: 40px;
+  }
+
+  .coding-submit-row {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    padding: var(--space-3);
+    background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: 0 -10px 28px rgba(15, 23, 42, 0.08);
+    backdrop-filter: blur(12px);
   }
 
   .coding-submit-actions {
@@ -3783,8 +3864,9 @@ body {
   }
 
   .coding-submit-actions .secondary-button,
-  .coding-submit-actions .start-button {
+  .coding-submit-actions .inline-start-button {
     flex: 1 1 140px;
+    min-height: 42px;
   }
 }
 

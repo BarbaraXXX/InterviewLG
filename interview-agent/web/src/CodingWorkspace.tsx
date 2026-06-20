@@ -54,6 +54,7 @@ export default function CodingWorkspace({
   const initialCode = isSubmitted
     ? task.submitted_code || task.draft_code || starterCodeForLanguage(task, initialLanguage)
     : task.draft_code || task.submitted_code || starterCodeForLanguage(task, initialLanguage);
+  const mobilePaneKey = `${task.id}:${task.revision_count}`;
   const [language, setLanguage] = useState(initialLanguage);
   const [code, setCode] = useState(initialCode);
   const [submitting, setSubmitting] = useState(false);
@@ -61,7 +62,13 @@ export default function CodingWorkspace({
   const [draftStatus, setDraftStatus] = useState(task.draft_code ? '已恢复草稿' : '');
   const [error, setError] = useState('');
   const [savedDraftKey, setSavedDraftKey] = useState(`${initialLanguage}\n${initialCode}`);
+  const [mobilePaneState, setMobilePaneState] = useState<{ key: string; pane: 'problem' | 'code' }>({
+    key: mobilePaneKey,
+    pane: 'problem',
+  });
   const draftKey = useMemo(() => `${language}\n${code}`, [code, language]);
+  const mobilePane = mobilePaneState.key === mobilePaneKey ? mobilePaneState.pane : 'problem';
+  const setMobilePane = (pane: 'problem' | 'code') => setMobilePaneState({ key: mobilePaneKey, pane });
 
   const handleLanguageChange = (nextLanguage: string) => {
     const shouldReplaceTemplate = isStarterTemplate(task, code);
@@ -122,8 +129,34 @@ export default function CodingWorkspace({
         </span>
       </div>
 
+      <div className="coding-mobile-tabs" role="tablist" aria-label="手撕代码区域">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobilePane === 'problem'}
+          aria-controls="coding-problem-pane"
+          className={mobilePane === 'problem' ? 'active' : ''}
+          onClick={() => setMobilePane('problem')}
+        >
+          题目
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mobilePane === 'code'}
+          aria-controls="coding-code-pane"
+          className={mobilePane === 'code' ? 'active' : ''}
+          onClick={() => setMobilePane('code')}
+        >
+          代码
+        </button>
+      </div>
+
       <div className="coding-task-body">
-        <section className="coding-problem">
+        <section
+          id="coding-problem-pane"
+          className={`coding-problem coding-pane ${mobilePane === 'problem' ? 'active' : ''}`}
+        >
           <h3>题目描述</h3>
           <MarkdownMessage content={task.description} />
           {isRevision && task.revision_instruction && (
@@ -159,7 +192,10 @@ export default function CodingWorkspace({
           )}
         </section>
 
-        <section className="coding-editor-panel">
+        <section
+          id="coding-code-pane"
+          className={`coding-editor-panel coding-pane ${mobilePane === 'code' ? 'active' : ''}`}
+        >
           <div className="coding-editor-toolbar">
             <label>
               <span>语言</span>
@@ -184,7 +220,7 @@ export default function CodingWorkspace({
           </div>
           <CodeMirror
             value={code}
-            height="360px"
+            height="var(--coding-editor-height, 360px)"
             theme={theme === 'dark' ? oneDark : 'light'}
             extensions={codingLanguageExtensions(language)}
             editable={!isSubmitted}
