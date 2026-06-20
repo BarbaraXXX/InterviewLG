@@ -178,6 +178,54 @@ class ContextSettings(BaseSettings):
         return min(max(value, 256), 32768)
 
 
+class SpeechSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="SPEECH_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    provider: str = "disabled"
+    api_key: str = ""
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "whisper-1"
+    timeout_seconds: float = 30.0
+    max_bytes: int = 10 * 1024 * 1024
+    max_duration_seconds: int = 120
+    allowed_mime_types: str = "audio/webm,audio/mp4,audio/mpeg,audio/wav,audio/x-wav,audio/ogg"
+    oss_endpoint: str = ""
+    oss_bucket: str = ""
+    oss_access_key_id: str = ""
+    oss_access_key_secret: str = ""
+    oss_prefix: str = "interview-agent/speech"
+    oss_url_expire_seconds: int = 300
+    keep_temp_objects: bool = False
+
+    def get_allowed_mime_types(self) -> set[str]:
+        return {item.strip().lower() for item in self.allowed_mime_types.split(",") if item.strip()}
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def _validate_timeout(cls, value: float) -> float:
+        return min(max(value, 1.0), 120.0)
+
+    @field_validator("max_bytes")
+    @classmethod
+    def _validate_max_bytes(cls, value: int) -> int:
+        return min(max(value, 128 * 1024), 25 * 1024 * 1024)
+
+    @field_validator("max_duration_seconds")
+    @classmethod
+    def _validate_max_duration(cls, value: int) -> int:
+        return min(max(value, 5), 600)
+
+    @field_validator("oss_url_expire_seconds")
+    @classmethod
+    def _validate_oss_url_expire(cls, value: int) -> int:
+        return min(max(value, 60), 3600)
+
+
 class ServerSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SERVER_",
@@ -200,6 +248,7 @@ auth_settings = AuthSettings()
 vectordb_settings = VectorDBSettings()
 rag_settings = RAGSettings()
 context_settings = ContextSettings()
+speech_settings = SpeechSettings()
 server_settings = ServerSettings()
 
 
@@ -232,6 +281,13 @@ def _log_loaded_settings() -> None:
             context_settings.recent_messages_trigger_tokens,
             context_settings.recent_messages_keep_tokens,
             context_settings.running_summary_max_tokens,
+        )
+        logger.info(
+            "speech settings provider=%s model=%s max_bytes=%d max_duration=%ds",
+            speech_settings.provider,
+            speech_settings.model,
+            speech_settings.max_bytes,
+            speech_settings.max_duration_seconds,
         )
     except Exception:
         logger.warning("failed to log loaded settings", exc_info=True)

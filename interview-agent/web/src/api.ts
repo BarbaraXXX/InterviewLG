@@ -96,6 +96,11 @@ export interface LastInterviewConfig {
   updated_at: string;
 }
 
+export interface SpeechTranscriptionResult {
+  text: string;
+  duration_ms: number | null;
+}
+
 function authHeaders(): Record<string, string> {
   return { 'Content-Type': 'application/json' };
 }
@@ -432,6 +437,27 @@ export async function deleteInterviewSessions(sessionIds: string[]): Promise<num
   }
   const data = await res.json();
   return data.deleted || 0;
+}
+
+export async function transcribeSpeech(audio: Blob, durationMs: number): Promise<SpeechTranscriptionResult> {
+  const form = new FormData();
+  const extension = audio.type.includes('mp4') ? 'm4a' : 'webm';
+  form.append('audio', audio, `speech.${extension}`);
+  form.append('duration_ms', String(Math.max(0, Math.round(durationMs))));
+
+  const res = await fetch(`${API_BASE}/speech/transcribe`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: form,
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || 'Speech transcription failed');
+  }
+  return res.json();
 }
 
 export function streamChat(

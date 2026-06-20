@@ -24,6 +24,7 @@ from interview_agent.db import (
     create_session as db_create_session,
 )
 from interview_agent.jd_parser import StructuredJD
+from interview_agent.speech import DisabledSpeechTranscriber, SpeechTranscriptionResult
 
 RESUME_PROJECTS = [{"name": "订单系统", "description": "负责缓存和接口设计"}]
 
@@ -89,6 +90,46 @@ def test_me_authenticated(auth_client):
 def test_me_unauthenticated(client):
     resp = client.get("/api/auth/me")
     assert resp.status_code in (401, 403)
+
+
+def test_transcribe_speech_not_configured(auth_client, monkeypatch):
+    monkeypatch.setattr(server_module, "get_speech_transcriber", lambda: DisabledSpeechTranscriber())
+    resp = auth_client.post(
+        "/api/speech/transcribe",
+        files={"audio": ("speech.webm", b"fake-audio", "audio/webm")},
+        data={"duration_ms": "1000"},
+    )
+    assert resp.status_code == 503
+
+
+def test_transcribe_speech_rejects_large_audio(auth_client, monkeypatch):
+    monkeypatch.setattr(server_module.speech_settings, "max_bytes", 4)
+    resp = auth_client.post(
+        "/api/speech/transcribe",
+        files={"audio": ("speech.webm", b"fake-audio", "audio/webm")},
+        data={"duration_ms": "1000"},
+    )
+    assert resp.status_code == 413
+
+
+def test_transcribe_speech_success(auth_client, monkeypatch):
+    class FakeTranscriber:
+        async def transcribe(self, audio, *, filename, content_type):
+            assert audio == b"fake-audio"
+            assert filename == "speech.webm"
+            assert content_type == "audio/webm"
+            return SpeechTranscriptionResult(text="这是一段转写文本")
+
+    monkeypatch.setattr(server_module.speech_settings, "max_bytes", 1024)
+    monkeypatch.setattr(server_module, "get_speech_transcriber", lambda: FakeTranscriber())
+
+    resp = auth_client.post(
+        "/api/speech/transcribe",
+        files={"audio": ("speech.webm", b"fake-audio", "audio/webm")},
+        data={"duration_ms": "1000"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"text": "这是一段转写文本", "duration_ms": 1000}
 
 
 def test_list_domains(client):

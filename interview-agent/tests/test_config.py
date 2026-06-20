@@ -6,6 +6,7 @@ from interview_agent.config import (
     LLMSettings,
     MCPSettings,
     ServerSettings,
+    SpeechSettings,
     VectorDBSettings,
 )
 
@@ -142,6 +143,53 @@ def test_context_settings_clamps_to_256k_ceiling(monkeypatch):
     assert s.input_budget_tokens == 262144
     assert s.recent_messages_trigger_tokens == 262144
     assert s.recent_messages_keep_tokens == 262144
+
+
+def test_speech_settings_default_disabled(monkeypatch):
+    for key in (
+        "SPEECH_PROVIDER",
+        "SPEECH_API_KEY",
+        "SPEECH_BASE_URL",
+        "SPEECH_MODEL",
+        "SPEECH_MAX_BYTES",
+        "SPEECH_MAX_DURATION_SECONDS",
+        "SPEECH_OSS_ENDPOINT",
+        "SPEECH_OSS_BUCKET",
+        "SPEECH_KEEP_TEMP_OBJECTS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    s = SpeechSettings(_env_file=None)
+    assert s.provider == "disabled"
+    assert s.model == "whisper-1"
+    assert "audio/webm" in s.get_allowed_mime_types()
+    assert s.keep_temp_objects is False
+
+
+def test_speech_settings_clamps_limits(monkeypatch):
+    monkeypatch.setenv("SPEECH_MAX_BYTES", "1")
+    monkeypatch.setenv("SPEECH_MAX_DURATION_SECONDS", "9999")
+    monkeypatch.setenv("SPEECH_TIMEOUT_SECONDS", "0.1")
+
+    s = SpeechSettings(_env_file=None)
+    assert s.max_bytes == 128 * 1024
+    assert s.max_duration_seconds == 600
+    assert s.timeout_seconds == 1.0
+
+
+def test_speech_settings_oss_config(monkeypatch):
+    monkeypatch.setenv("SPEECH_PROVIDER", "dashscope_file")
+    monkeypatch.setenv("SPEECH_OSS_ENDPOINT", "oss-cn-hangzhou.aliyuncs.com")
+    monkeypatch.setenv("SPEECH_OSS_BUCKET", "bucket")
+    monkeypatch.setenv("SPEECH_OSS_ACCESS_KEY_ID", "ak")
+    monkeypatch.setenv("SPEECH_OSS_ACCESS_KEY_SECRET", "sk")
+    monkeypatch.setenv("SPEECH_OSS_URL_EXPIRE_SECONDS", "10")
+
+    s = SpeechSettings(_env_file=None)
+    assert s.provider == "dashscope_file"
+    assert s.oss_endpoint == "oss-cn-hangzhou.aliyuncs.com"
+    assert s.oss_bucket == "bucket"
+    assert s.oss_url_expire_seconds == 60
 
 
 def test_mcp_settings_default(monkeypatch):

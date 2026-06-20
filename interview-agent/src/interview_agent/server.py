@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
@@ -15,7 +15,14 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from interview_agent.auth import authenticate, get_current_user, register
-from interview_agent.config import auth_settings, context_settings, llm_settings, server_settings, vectordb_settings
+from interview_agent.config import (
+    auth_settings,
+    context_settings,
+    llm_settings,
+    server_settings,
+    speech_settings,
+    vectordb_settings,
+)
 from interview_agent.context import build_agent_input
 from interview_agent.context_usage import build_context_usage, compact_usage_for_log, split_recent_messages_by_tokens
 from interview_agent.db import (
@@ -50,6 +57,7 @@ from interview_agent.memory import (
 from interview_agent.migrate import migrate_users_if_needed
 from interview_agent.prompts import PRESET_DOMAINS, build_system_prompt
 from interview_agent.session import session_manager
+from interview_agent.speech import SpeechNotConfiguredError, SpeechTranscriptionError, get_speech_transcriber
 from interview_agent.state_updater import record_turn_state
 
 logger = logging.getLogger(__name__)
@@ -166,6 +174,53 @@ async def api_me(username: str = Depends(get_current_user)) -> dict:
     return {"username": username}
 
 
+@app.post("/api/speech/transcribe")
+@limiter.limit("3/minute")
+async def transcribe_speech(
+    request: Request,
+    audio: UploadFile = File(...),
+    duration_ms: int | None = Form(None),
+    username: str = Depends(get_current_user),
+) -> dict:
+    content_type = (audio.content_type or "").split(";")[0].strip().lower()
+    allowed_mime_types = speech_settings.get_allowed_mime_types()
+    if content_type not in allowed_mime_types:
+        raise HTTPException(status_code=400, detail="Unsupported audio type")
+    if duration_ms is not None and duration_ms > speech_settings.max_duration_seconds * 1000:
+        raise HTTPException(status_code=400, detail="Audio duration is too long")
+
+    try:
+        data = await audio.read(speech_settings.max_bytes + 1)
+    finally:
+        await audio.close()
+    if not data:
+        raise HTTPException(status_code=400, detail="Audio file is empty")
+    if len(data) > speech_settings.max_bytes:
+        raise HTTPException(status_code=413, detail="Audio file is too large")
+
+    logger.info(
+        "speech transcription start user=%s bytes=%d duration_ms=%s content_type=%s",
+        username,
+        len(data),
+        duration_ms,
+        content_type,
+    )
+    transcriber = get_speech_transcriber()
+    try:
+        result = await transcriber.transcribe(
+            data,
+            filename=_clean_audio_filename(audio.filename),
+            content_type=content_type,
+        )
+    except SpeechNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SpeechTranscriptionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    logger.info("speech transcription done user=%s text_len=%d", username, len(result.text))
+    return {"text": result.text, "duration_ms": duration_ms}
+
+
 class CreateSessionRequest(BaseModel):
     domain: str
     difficulty: str = "campus_fulltime"
@@ -224,6 +279,14 @@ _MAX_RESUME_SKILLS_LEN = 2000
 _SUPPORTED_CODING_LANGUAGES = {"python", "javascript", "typescript", "java", "cpp", "go"}
 _MAX_CODE_SUBMISSION_LEN = 20000
 _MAX_CONTEXT_MESSAGE_LEN = 40000
+_SAFE_AUDIO_FILENAME_CHARS = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+
+
+def _clean_audio_filename(filename: str | None) -> str:
+    if not filename:
+        return "speech.webm"
+    cleaned = "".join(ch for ch in filename if ch in _SAFE_AUDIO_FILENAME_CHARS).strip(".")
+    return cleaned[:80] or "speech.webm"
 
 
 def _format_jd(jd: object) -> str:

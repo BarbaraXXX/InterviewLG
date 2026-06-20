@@ -21,6 +21,7 @@ import {
   register,
   resumeInterviewSession,
   streamChat,
+  transcribeSpeech,
   submitCodingTask,
   updateResume,
   type CodingTask,
@@ -41,6 +42,7 @@ const CodingWorkspace = lazy(() => import('./CodingWorkspace'));
 
 type View = 'loading' | 'login' | 'dashboard' | 'setup' | 'chat' | 'profile' | 'history' | 'insights';
 type ThemeMode = 'light' | 'dark';
+type SpeechInputState = 'idle' | 'recording' | 'uploading';
 
 interface Message {
   role: 'user' | 'ai';
@@ -55,6 +57,7 @@ const HISTORY_WARNING_THRESHOLD = 45;
 const INTERVIEW_END_PHRASE = '本次面试到此结束';
 const AUTO_END_DELAY_MS = 10000;
 const AUTO_END_NOTICE_MS = 5000;
+const MAX_SPEECH_RECORDING_MS = 120000;
 
 function getInitialTheme(): ThemeMode {
   try {
@@ -78,6 +81,13 @@ function persistTheme(theme: ThemeMode): void {
   } catch {
     // Theme still applies for the current page if storage is unavailable.
   }
+}
+
+function formatSpeechRecordingTime(seconds: number): string {
+  const safeSeconds = Math.max(0, seconds);
+  const minutes = Math.floor(safeSeconds / 60);
+  const rest = safeSeconds % 60;
+  return `${minutes}:${String(rest).padStart(2, '0')}`;
 }
 
 function hasActiveBrowserSession(): boolean {
@@ -1975,10 +1985,17 @@ function ChatView({
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
   const [autoEndNotice, setAutoEndNotice] = useState('');
   const [autoEnded, setAutoEnded] = useState(false);
+  const [speechState, setSpeechState] = useState<SpeechInputState>('idle');
+  const [speechError, setSpeechError] = useState('');
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const autoEndTimerRef = useRef<number | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingStartedAtRef = useRef(0);
+  const recordingTimerRef = useRef<number | null>(null);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2027,6 +2044,10 @@ function ChatView({
     if (noticeTimerRef.current !== null) {
       window.clearTimeout(noticeTimerRef.current);
     }
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+    }
+    mediaRecorderRef.current?.stream.getTracks().forEach((track) => track.stop());
   }, []);
 
   const refreshCodingTask = useCallback(async () => {
@@ -2118,6 +2139,122 @@ function ChatView({
     );
     abortRef.current = controller;
   }, [autoEnded, isStreaming, refreshCodingTask, refreshContextUsage, scheduleAutoEnd, sessionId]);
+
+  const finalizeSpeechRecording = useCallback(async () => {
+    if (recordingTimerRef.current !== null) {
+      window.clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    const recorder = mediaRecorderRef.current;
+    const chunks = audioChunksRef.current;
+    mediaRecorderRef.current = null;
+    audioChunksRef.current = [];
+    recorder?.stream.getTracks().forEach((track) => track.stop());
+
+    const durationMs = recordingStartedAtRef.current > 0 ? Date.now() - recordingStartedAtRef.current : 0;
+    recordingStartedAtRef.current = 0;
+    setRecordingSeconds(0);
+
+    if (chunks.length === 0) {
+      setSpeechState('idle');
+      setSpeechError('没有录到有效语音，请重试。');
+      return;
+    }
+
+    const audioType = recorder?.mimeType || chunks[0]?.type || 'audio/webm';
+    const audioBlob = new Blob(chunks, { type: audioType });
+    setSpeechState('uploading');
+    setSpeechError('');
+    try {
+      const result = await transcribeSpeech(audioBlob, durationMs);
+      const transcript = result.text.trim();
+      if (!transcript) {
+        setSpeechError('没有识别到有效文本，请重试或手动输入。');
+        return;
+      }
+      setInput((prev) => {
+        const current = prev.trimEnd();
+        return current ? `${current}\n${transcript}` : transcript;
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '语音转写失败';
+      if (message === 'UNAUTHORIZED') {
+        setSpeechError('登录状态已失效，请重新登录后再使用语音输入。');
+      } else if (message.includes('not configured') || message.includes('SPEECH_API_KEY')) {
+        setSpeechError('语音转写服务尚未配置，请先使用键盘输入。');
+      } else {
+        setSpeechError('语音转写失败，请重试或手动输入。');
+      }
+    } finally {
+      setSpeechState('idle');
+    }
+  }, []);
+
+  const stopSpeechRecording = useCallback(() => {
+    const recorder = mediaRecorderRef.current;
+    if (!recorder) return;
+    if (recorder.state === 'recording') {
+      recorder.requestData();
+      recorder.stop();
+    }
+  }, []);
+
+  const startSpeechRecording = useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia || !('MediaRecorder' in window)) {
+      setSpeechError('当前浏览器不支持录音，请使用新版 Chrome、Edge 或 Safari。');
+      return;
+    }
+    setSpeechError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferredMimeType = [
+        'audio/mp4',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+      ].find((type) => MediaRecorder.isTypeSupported(type));
+      const recorder = new MediaRecorder(stream, preferredMimeType ? { mimeType: preferredMimeType } : undefined);
+      mediaRecorderRef.current = recorder;
+      audioChunksRef.current = [];
+      recordingStartedAtRef.current = Date.now();
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      recorder.onerror = () => {
+        setSpeechError('录音失败，请检查浏览器麦克风权限。');
+        stopSpeechRecording();
+      };
+      recorder.onstop = () => {
+        void finalizeSpeechRecording();
+      };
+
+      recorder.start();
+      setSpeechState('recording');
+      setRecordingSeconds(0);
+      recordingTimerRef.current = window.setInterval(() => {
+        const elapsedMs = Date.now() - recordingStartedAtRef.current;
+        setRecordingSeconds(Math.floor(elapsedMs / 1000));
+        if (elapsedMs >= MAX_SPEECH_RECORDING_MS) {
+          stopSpeechRecording();
+        }
+      }, 500);
+    } catch {
+      setSpeechState('idle');
+      setSpeechError('无法访问麦克风，请检查浏览器权限后重试。');
+    }
+  }, [finalizeSpeechRecording, stopSpeechRecording]);
+
+  const handleSpeechToggle = () => {
+    if (speechState === 'recording') {
+      stopSpeechRecording();
+      return;
+    }
+    if (speechState === 'idle') {
+      void startSpeechRecording();
+    }
+  };
 
   const handleSend = () => {
     startAgentStream(input);
@@ -2212,6 +2349,26 @@ function ChatView({
           </div>
 
           <div className="chat-input-bar">
+            <button
+              aria-label={speechState === 'recording' ? '停止录音' : '语音输入'}
+              className={`voice-button ${speechState}`}
+              onClick={handleSpeechToggle}
+              disabled={speechState === 'uploading' || ((isStreaming || autoEnded) && speechState !== 'recording')}
+              title={speechState === 'recording' ? '停止录音并转写' : '语音输入'}
+              type="button"
+            >
+              {speechState === 'recording' ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <rect x="7" y="7" width="10" height="10" rx="2" />
+                </svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="22" />
+                </svg>
+              )}
+            </button>
             <textarea
               aria-label="面试回答"
               className="chat-input"
@@ -2228,13 +2385,21 @@ function ChatView({
               aria-label="发送回答"
               className="send-button"
               onClick={handleSend}
-              disabled={!input.trim() || isStreaming || autoEnded}
+              disabled={!input.trim() || isStreaming || autoEnded || speechState === 'uploading'}
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="22" y1="2" x2="11" y2="13" />
                 <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>
             </button>
+          </div>
+          <div className={`speech-input-hint ${speechError ? 'error' : ''}`} role="status">
+            {speechError ||
+              (speechState === 'recording'
+                ? `正在录音 ${formatSpeechRecordingTime(recordingSeconds)}，再次点击麦克风停止并转写。`
+                : speechState === 'uploading'
+                  ? '正在转写语音，完成后会填入输入框。'
+                  : '可使用语音转写为文本，发送前请检查内容；请勿输入身份证号、手机号等敏感信息。')}
           </div>
         </section>
         {codingTask && (
