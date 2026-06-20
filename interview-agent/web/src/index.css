@@ -3333,6 +3333,45 @@ body {
     justify-content: flex-start;
   }
 
+  .resume-main,
+  .resume-editor {
+    gap: var(--space-3);
+  }
+
+  .privacy-notice {
+    padding: var(--space-3);
+  }
+
+  .resume-projects-head,
+  .resume-project-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .resume-project-title-row .secondary-button {
+    width: 100%;
+  }
+
+  .resume-project-block {
+    padding: var(--space-3);
+  }
+
+  .resume-form small {
+    text-align: left;
+  }
+
+  .resume-form textarea.custom-input {
+    min-height: 132px;
+  }
+
+  .resume-form-actions .secondary-button,
+  .resume-form-actions .inline-start-button,
+  .resume-card-actions .secondary-button,
+  .resume-card-actions .danger-button {
+    flex: 1 1 132px;
+  }
+
   .auth-hero-copy h1 {
     font-size: 1.9rem;
   }
@@ -3350,7 +3389,9 @@ body {
   .dashboard-actions,
   .dashboard-status,
   .release-panel,
-  .history-layout {
+  .history-layout,
+  .placeholder-layout,
+  .placeholder-blocks {
     gap: var(--space-3);
   }
 
@@ -3392,6 +3433,21 @@ body {
     flex-basis: min(300px, calc(100vw - 56px));
     max-height: 360px;
     overflow-y: auto;
+  }
+
+  .placeholder-actions,
+  .history-head-actions,
+  .history-detail-actions {
+    width: 100%;
+  }
+
+  .placeholder-actions .secondary-button,
+  .placeholder-actions .inline-start-button,
+  .history-head-actions .secondary-button,
+  .history-head-actions .danger-button,
+  .history-detail-actions .secondary-button,
+  .history-detail-actions .inline-start-button {
+    flex: 1 1 132px;
   }
 
   .domain-grid,
@@ -3752,13 +3808,28 @@ body {
     min-height: auto;
   }
 
+  .history-panel-head,
+  .history-detail-head {
+    padding-bottom: var(--space-3);
+  }
+
   .history-records {
     flex: 1;
     max-height: none;
+    padding-right: 0;
   }
 
   .history-record {
     padding: var(--space-3);
+  }
+
+  .history-record-select {
+    padding-left: calc(var(--space-3) + 28px);
+  }
+
+  .history-record-select input {
+    width: 20px;
+    height: 20px;
   }
 
   .history-detail-head h2,
@@ -3767,8 +3838,37 @@ body {
     font-size: 0.95rem;
   }
 
+  .history-empty,
+  .history-detail-empty,
+  .qa-card,
+  .history-coding-card {
+    padding: var(--space-3);
+  }
+
+  .qa-card-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .qa-message {
+    padding: var(--space-2) var(--space-3);
+  }
+
   .qa-list {
     gap: var(--space-3);
+  }
+
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: var(--space-3);
+  }
+
+  .history-notice-modal {
+    max-height: calc(100dvh - var(--space-6));
+    overflow-y: auto;
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
   }
 
   .coding-task-head,
@@ -3888,6 +3988,19 @@ body {
   .end-button {
     padding-right: var(--space-2);
     padding-left: var(--space-2);
+  }
+
+  .resume-form-actions .secondary-button,
+  .resume-form-actions .inline-start-button,
+  .resume-card-actions .secondary-button,
+  .resume-card-actions .danger-button,
+  .placeholder-actions .secondary-button,
+  .placeholder-actions .inline-start-button,
+  .history-head-actions .secondary-button,
+  .history-head-actions .danger-button,
+  .history-detail-actions .secondary-button,
+  .history-detail-actions .inline-start-button {
+    flex-basis: 100%;
   }
 
   .speech-device-row {
