@@ -108,6 +108,7 @@
 body {
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
   background:
     linear-gradient(var(--color-grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--color-grid-line) 1px, transparent 1px),
@@ -119,6 +120,7 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .theme-toggle {
@@ -3184,6 +3186,11 @@ body {
     position: static;
   }
 
+  .dashboard-status {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .placeholder-blocks {
     grid-template-columns: 1fr;
   }
@@ -3230,9 +3237,26 @@ body {
     --site-footer-height: 48px;
   }
 
+  body {
+    min-width: 0;
+  }
+
   .setup-view {
     align-items: flex-start;
-    padding: var(--space-4) var(--space-4) calc(var(--space-6) + var(--site-footer-height));
+    min-width: 0;
+    padding: var(--space-3) var(--space-3) calc(var(--space-6) + var(--site-footer-height) + env(safe-area-inset-bottom));
+  }
+
+  .auth-layout,
+  .auth-shell,
+  .setup-workspace,
+  .console-shell,
+  .dashboard-shell,
+  .placeholder-shell,
+  .profile-shell,
+  .history-shell {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .auth-command,
@@ -3249,7 +3273,8 @@ body {
   .history-list-panel,
   .history-detail-panel,
   .loading-panel {
-    padding: var(--space-5);
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
   }
 
   .auth-command-top,
@@ -3266,6 +3291,15 @@ body {
   .history-head-actions,
   .history-detail-actions {
     justify-content: flex-start;
+  }
+
+  .console-topbar {
+    gap: var(--space-3);
+  }
+
+  .console-topbar .user-badge {
+    width: 100%;
+    flex-wrap: wrap;
   }
 
   .history-manage-bar,
@@ -3297,8 +3331,58 @@ body {
   .auth-metrics,
   .auth-sequence,
   .rail-steps,
-  .dashboard-actions {
+  .dashboard-actions,
+  .dashboard-status {
     grid-template-columns: 1fr;
+  }
+
+  .dashboard-grid,
+  .dashboard-hero,
+  .dashboard-actions,
+  .dashboard-status,
+  .release-panel,
+  .history-layout {
+    gap: var(--space-3);
+  }
+
+  .dashboard-hero {
+    padding: var(--space-4);
+  }
+
+  .workspace-action {
+    min-height: 132px;
+    padding: var(--space-3);
+  }
+
+  .workspace-action em {
+    width: 30px;
+    height: 30px;
+  }
+
+  .dashboard-status div {
+    padding: var(--space-3);
+  }
+
+  .release-panel {
+    padding: var(--space-4);
+  }
+
+  .release-title-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .release-list {
+    gap: var(--space-2);
+    padding-bottom: var(--space-3);
+    scroll-snap-type: x mandatory;
+  }
+
+  .release-note {
+    flex-basis: min(300px, calc(100vw - 56px));
+    max-height: 360px;
+    overflow-y: auto;
   }
 
   .domain-grid,
@@ -3338,15 +3422,109 @@ body {
   }
 
   .message-row {
-    max-width: 90%;
+    max-width: 94%;
   }
 
   .chat-messages {
     padding: var(--space-3);
+    gap: var(--space-3);
   }
 
   .chat-input-bar {
-    padding: var(--space-2) var(--space-3) var(--space-3);
+    padding: var(--space-2) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom));
+  }
+
+  .chat-view {
+    min-width: 0;
+    padding-bottom: calc(var(--site-footer-height) + env(safe-area-inset-bottom));
+  }
+
+  .chat-body,
+  .chat-panel {
+    min-width: 0;
+  }
+
+  .chat-header {
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    min-height: auto;
+  }
+
+  .chat-header-info {
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .chat-header-domain,
+  .chat-header-diff {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chat-header-actions {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .chat-header-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .context-usage-meter {
+    min-width: 136px;
+    padding: 6px 8px;
+  }
+
+  .pause-button,
+  .end-button {
+    min-height: 36px;
+    white-space: nowrap;
+  }
+
+  .voice-button,
+  .send-button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .chat-input {
+    min-height: 44px;
+    font-size: 1rem;
+  }
+
+  .message-bubble {
+    max-width: 100%;
+    padding: 10px var(--space-3);
+    font-size: 0.85rem;
+  }
+
+  .ai-avatar,
+  .ai-avatar svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .markdown-content,
+  .message-bubble,
+  .history-coding-card,
+  .coding-problem {
+    overflow-wrap: anywhere;
+  }
+
+  .markdown-content pre,
+  .history-coding-card pre {
+    max-width: 100%;
+  }
+
+  .markdown-content th,
+  .markdown-content td {
+    white-space: normal;
   }
 
   .speech-device-row {
@@ -3355,6 +3533,7 @@ body {
     gap: var(--space-1);
     padding-right: var(--space-3);
     padding-left: var(--space-3);
+    margin-top: var(--space-1);
   }
 
   .speech-device-control {
@@ -3364,6 +3543,7 @@ body {
   .speech-device-select {
     width: 100%;
     min-width: 0;
+    height: 36px;
   }
 
   .speech-meter-panel {
@@ -3375,6 +3555,81 @@ body {
     align-items: flex-start;
     flex-direction: column;
     gap: var(--space-1);
+  }
+
+  .speech-input-hint:not(.recording) {
+    padding-right: var(--space-3);
+    padding-left: var(--space-3);
+  }
+
+  .history-list-panel {
+    min-height: auto;
+    height: min(520px, calc(100dvh - 160px));
+    overflow: hidden;
+  }
+
+  .history-detail-panel {
+    min-height: auto;
+  }
+
+  .history-records {
+    flex: 1;
+    max-height: none;
+  }
+
+  .history-record {
+    padding: var(--space-3);
+  }
+
+  .history-detail-head h2,
+  .history-empty strong,
+  .history-detail-empty h2 {
+    font-size: 0.95rem;
+  }
+
+  .qa-list {
+    gap: var(--space-3);
+  }
+
+  .coding-task-head,
+  .coding-editor-toolbar,
+  .coding-submit-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .coding-editor-toolbar label {
+    min-width: 0;
+  }
+
+  .coding-submit-actions {
+    justify-content: stretch;
+  }
+
+  .coding-submit-actions .secondary-button,
+  .coding-submit-actions .start-button {
+    flex: 1 1 140px;
+  }
+}
+
+@media (max-width: 390px) {
+  .setup-view {
+    padding-right: var(--space-2);
+    padding-left: var(--space-2);
+  }
+
+  .chat-header-actions {
+    gap: 6px;
+  }
+
+  .pause-button,
+  .end-button {
+    padding-right: var(--space-2);
+    padding-left: var(--space-2);
+  }
+
+  .release-note {
+    flex-basis: calc(100vw - 40px);
   }
 }
 
