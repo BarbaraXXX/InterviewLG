@@ -1588,6 +1588,26 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
   const activeDomainLabel = activeDomain ? (DOMAIN_LABELS[activeDomain] || activeDomain) : '待选择';
   const activeDifficulty = DIFFICULTY_OPTIONS.find((opt) => opt.value === difficulty) || DIFFICULTY_OPTIONS[1];
   const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
+  const [mobileSetupStep, setMobileSetupStep] = useState(0);
+  const setupSteps = [
+    { key: 'domain', label: '技术方向', summary: activeDomainLabel },
+    { key: 'resume', label: '简历选择', summary: selectedResume ? selectedResume.title : '可选' },
+    { key: 'target', label: '目标岗位', summary: activeDifficulty.label },
+    {
+      key: 'context',
+      label: '岗位信息',
+      summary: jobDescription.trim() || selectedProfileIdx !== -1 ? '已补充' : '可选',
+    },
+    { key: 'confirm', label: '确认启动', summary: activeDomain ? '可开始' : '待选择' },
+  ];
+  const currentMobileSetupStep = setupSteps[mobileSetupStep] || setupSteps[0];
+  const isConfirmStep = currentMobileSetupStep.key === 'confirm';
+  const canContinueMobileSetup = currentMobileSetupStep.key !== 'domain' || Boolean(activeDomain);
+  const goPrevMobileSetupStep = () => setMobileSetupStep((step) => Math.max(0, step - 1));
+  const goNextMobileSetupStep = () => {
+    if (!canContinueMobileSetup) return;
+    setMobileSetupStep((step) => Math.min(setupSteps.length - 1, step + 1));
+  };
 
   const applyInterviewConfig = (
     config: LastInterviewConfig,
@@ -1692,7 +1712,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
       <div className="console-shell">
         <ConsoleTopbar title="模拟技术面试" username={username} theme={theme} onToggleTheme={onToggleTheme} onLogout={onLogout} onHome={onBack} />
 
-        <div className="console-grid">
+        <div className={`console-grid setup-step-${currentMobileSetupStep.key}`}>
           <aside className="workflow-rail" aria-label="配置步骤">
             <div className="rail-title">
               <p className="eyebrow">Workflow</p>
@@ -1761,7 +1781,23 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
 
             {configNotice && <div className="config-notice">{configNotice}</div>}
 
-            <section className="config-section">
+            <nav className="mobile-setup-stepper" aria-label="面试配置步骤">
+              {setupSteps.map((step, index) => (
+                <button
+                  key={step.key}
+                  className={`mobile-setup-step ${index === mobileSetupStep ? 'active' : ''} ${index < mobileSetupStep ? 'complete' : ''}`}
+                  type="button"
+                  onClick={() => setMobileSetupStep(index)}
+                  aria-current={index === mobileSetupStep ? 'step' : undefined}
+                >
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <strong>{step.label}</strong>
+                  <small>{step.summary}</small>
+                </button>
+              ))}
+            </nav>
+
+            <section className={`config-section mobile-config-step ${currentMobileSetupStep.key === 'domain' ? 'active' : ''}`}>
               <div className="section-heading">
                 <label className="section-label">技术方向</label>
                 <p>选择最接近目标岗位的方向，面试官会围绕对应能力模型追问。</p>
@@ -1792,7 +1828,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               </div>
             </section>
 
-            <section className="config-section">
+            <section className={`config-section mobile-config-step ${currentMobileSetupStep.key === 'resume' ? 'active' : ''}`}>
               <div className="section-heading">
                 <label className="section-label">简历选择（可选）</label>
                 <p>选择一份简历后，本次面试会围绕项目经验和技能特长调整追问重点。</p>
@@ -1839,7 +1875,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               )}
             </section>
 
-            <section className="config-section">
+            <section className={`config-section mobile-config-step ${currentMobileSetupStep.key === 'target' ? 'active' : ''}`}>
               <div className="section-heading">
                 <label className="section-label">目标岗位</label>
                 <p>选择你正在准备的校招岗位类型。实习更关注基础和学习能力，正式岗更关注项目理解和工程意识。</p>
@@ -1861,7 +1897,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               </div>
             </section>
 
-            <div className="context-grid">
+            <div className={`context-grid mobile-config-step ${currentMobileSetupStep.key === 'context' ? 'active' : ''}`}>
               <section className="context-panel">
                 <div className="section-heading">
                   <label className="section-label" htmlFor="job-description">岗位JD（可选）</label>
@@ -1919,6 +1955,27 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
                   </div>
                 )}
               </section>
+            </div>
+
+            <div className="mobile-setup-nav">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={goPrevMobileSetupStep}
+                disabled={mobileSetupStep === 0}
+              >
+                上一步
+              </button>
+              {!isConfirmStep && (
+                <button
+                  className="start-button mobile-next-button"
+                  type="button"
+                  onClick={goNextMobileSetupStep}
+                  disabled={!canContinueMobileSetup}
+                >
+                  下一步
+                </button>
+              )}
             </div>
           </main>
 

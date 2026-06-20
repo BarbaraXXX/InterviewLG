@@ -2153,6 +2153,11 @@ body {
   border-radius: var(--radius-md);
 }
 
+.mobile-setup-stepper,
+.mobile-setup-nav {
+  display: none;
+}
+
 .config-section,
 .context-panel {
   padding: var(--space-5);
@@ -3410,6 +3415,127 @@ body {
 
   .setup-title {
     font-size: 1.55rem;
+  }
+
+  .setup-view .workflow-rail {
+    display: none;
+  }
+
+  .mobile-setup-stepper {
+    display: flex;
+    gap: var(--space-2);
+    margin: calc(var(--space-2) * -1) calc(var(--space-1) * -1) 0;
+    padding: 0 var(--space-1) var(--space-2);
+    overflow-x: auto;
+    scrollbar-width: none;
+    scroll-snap-type: x proximity;
+  }
+
+  .mobile-setup-stepper::-webkit-scrollbar {
+    display: none;
+  }
+
+  .mobile-setup-step {
+    flex: 0 0 min(156px, 46vw);
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 2px var(--space-2);
+    align-items: center;
+    min-height: 64px;
+    padding: var(--space-2);
+    text-align: left;
+    color: var(--color-text-secondary);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    scroll-snap-align: start;
+  }
+
+  .mobile-setup-step span {
+    grid-row: span 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    color: var(--color-text-tertiary);
+    background: var(--color-surface-raised);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+    font-size: 0.72rem;
+    font-weight: 800;
+  }
+
+  .mobile-setup-step strong,
+  .mobile-setup-step small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mobile-setup-step strong {
+    color: var(--color-text);
+    font-size: 0.84rem;
+  }
+
+  .mobile-setup-step small {
+    color: var(--color-text-tertiary);
+    font-size: 0.72rem;
+  }
+
+  .mobile-setup-step.active,
+  .mobile-setup-step.complete {
+    border-color: var(--color-accent-border);
+  }
+
+  .mobile-setup-step.active span,
+  .mobile-setup-step.complete span {
+    color: var(--color-on-accent);
+    background: var(--color-accent);
+    border-color: transparent;
+  }
+
+  .setup-view .mobile-config-step {
+    display: none;
+  }
+
+  .setup-view .mobile-config-step.active {
+    display: block;
+  }
+
+  .setup-view .context-grid.mobile-config-step.active {
+    display: grid;
+  }
+
+  .setup-view .console-grid:not(.setup-step-confirm) .launch-panel {
+    display: none;
+  }
+
+  .setup-view .console-grid.setup-step-confirm .launch-panel {
+    display: flex;
+  }
+
+  .mobile-setup-nav {
+    position: sticky;
+    bottom: calc(var(--site-footer-height) + env(safe-area-inset-bottom) + var(--space-2));
+    z-index: 8;
+    display: flex;
+    gap: var(--space-2);
+    align-items: stretch;
+    padding: var(--space-2);
+    background: color-mix(in srgb, var(--color-surface-raised) 92%, transparent);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    backdrop-filter: blur(12px);
+  }
+
+  .mobile-setup-nav .secondary-button,
+  .mobile-setup-nav .mobile-next-button {
+    flex: 1;
+    min-height: 44px;
+    margin-top: 0;
   }
 
   .domain-card,
