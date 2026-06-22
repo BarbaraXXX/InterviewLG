@@ -1,4 +1,5 @@
 import { lazy, Suspense, useState, useRef, useEffect, useCallback } from 'react';
+import { ArrowRight, ChevronDown, FileText, Play, RotateCcw, Sparkles } from 'lucide-react';
 import {
   createSession,
   createResume,
@@ -35,12 +36,19 @@ import {
 } from './api';
 import { CODING_LANGUAGE_LABELS } from './codingLanguages';
 import MarkdownMessage from './MarkdownMessage';
+import MobileBottomNav from './MobileBottomNav';
+import {
+  getActiveMobileNavigationItem,
+  shouldShowMobileNavigation,
+  type MobileNavigationItem,
+  type MobileNavigationView,
+} from './mobileNavigation';
 import { RELEASE_NOTES } from './releaseNotes';
 import { APP_VERSION } from './version';
 
 const CodingWorkspace = lazy(() => import('./CodingWorkspace'));
 
-type View = 'loading' | 'login' | 'dashboard' | 'setup' | 'chat' | 'profile' | 'history' | 'insights';
+type View = MobileNavigationView;
 type ThemeMode = 'light' | 'dark';
 type SpeechInputState = 'idle' | 'recording' | 'uploading';
 
@@ -631,6 +639,8 @@ function DashboardView({
   const completedCount = sessions.filter((session) => session.status === 'completed').length;
   const totalMessages = sessions.reduce((sum, session) => sum + session.message_count, 0);
   const latestSession = sessions[0];
+  const interruptedSession = sessions.find((session) => session.status === 'paused');
+  const latestReleaseNote = RELEASE_NOTES[0];
   const shouldShowHistoryNotice = !summaryUnavailable
     && sessions.length > HISTORY_WARNING_THRESHOLD
     && !historyNoticeDismissed;
@@ -640,7 +650,92 @@ function DashboardView({
       <div className="console-shell dashboard-shell">
         <ConsoleTopbar title="Interview Agent 工作台" username={username} theme={theme} onToggleTheme={onToggleTheme} onLogout={onLogout} />
 
-        <main className="dashboard-grid">
+        <main className="mobile-dashboard" aria-label="移动端工作台">
+          <header className="mobile-dashboard-intro">
+            <p className="eyebrow">Workspace</p>
+            <h1>继续你的面试训练</h1>
+            <p>
+              {summaryUnavailable
+                ? '历史概览暂不可用，你仍然可以正常开始新的模拟面试。'
+                : latestSession
+                  ? `最近练习：${DOMAIN_LABELS[latestSession.domain] || latestSession.domain} · ${STATUS_LABELS[latestSession.status] || latestSession.status}`
+                  : '完成第一次模拟面试后，这里会展示你的训练进度。'}
+            </p>
+          </header>
+
+          <section className="mobile-dashboard-primary" aria-label="开始面试">
+            <span>Next action</span>
+            <strong>开始新的模拟面试</strong>
+            <p>配置方向、目标岗位和 JD，进入连续追问。</p>
+            <button className="start-button" type="button" onClick={onStartInterview}>
+              <Play size={18} fill="currentColor" aria-hidden="true" />
+              <span>立即开始</span>
+            </button>
+            {interruptedSession && (
+              <button className="mobile-dashboard-resume" type="button" onClick={onHistory}>
+                <RotateCcw size={16} aria-hidden="true" />
+                <span>继续中断的面试</span>
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            )}
+          </section>
+
+          <section className="mobile-dashboard-section" aria-labelledby="mobile-training-summary">
+            <div className="mobile-dashboard-section-head">
+              <h2 id="mobile-training-summary">训练概览</h2>
+              <button type="button" onClick={onHistory}>查看全部</button>
+            </div>
+            <div className="mobile-dashboard-metrics">
+              <div><strong>{summaryUnavailable ? '—' : sessions.length}</strong><span>累计面试</span></div>
+              <div><strong>{summaryUnavailable ? '—' : completedCount}</strong><span>已经完成</span></div>
+              <div><strong>{summaryUnavailable ? '—' : totalMessages}</strong><span>对话消息</span></div>
+            </div>
+          </section>
+
+          <section className="mobile-dashboard-section" aria-labelledby="mobile-shortcuts">
+            <div className="mobile-dashboard-section-head">
+              <h2 id="mobile-shortcuts">快捷入口</h2>
+            </div>
+            <div className="mobile-dashboard-shortcuts">
+              <button type="button" onClick={onProfile}>
+                <FileText size={20} aria-hidden="true" />
+                <span><strong>简历信息</strong><small>维护项目与技能</small></span>
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+              <button type="button" onClick={onInsights}>
+                <Sparkles size={20} aria-hidden="true" />
+                <span><strong>AI 总结</strong><small>查看长期能力变化</small></span>
+                <ArrowRight size={16} aria-hidden="true" />
+              </button>
+            </div>
+          </section>
+
+          {latestReleaseNote && (
+            <details className="mobile-dashboard-release">
+              <summary>
+                <span><small>最近更新 · {APP_VERSION}</small><strong>{latestReleaseNote.title}</strong></span>
+                <ChevronDown size={18} aria-hidden="true" />
+              </summary>
+              <div className="release-list">
+                {RELEASE_NOTES.map((note) => (
+                  <article className="release-note" key={`${note.date}-${note.title}`}>
+                    <time>{note.date}</time>
+                    <strong>{note.title}</strong>
+                    <ul>{note.items.map((item) => <li key={item}>{item}</li>)}</ul>
+                    {note.sections?.map((section) => (
+                      <div className="release-note-section" key={section.title}>
+                        <span>{section.title}</span>
+                        <ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul>
+                      </div>
+                    ))}
+                  </article>
+                ))}
+              </div>
+            </details>
+          )}
+        </main>
+
+        <main className="dashboard-grid dashboard-desktop">
           <section className="dashboard-hero" aria-label="工作台概览">
             <div className="dashboard-hero-copy">
               <p className="eyebrow">Workspace</p>
@@ -2893,8 +2988,21 @@ function App() {
     setHistoryNoticeDismissed(true);
   };
 
+  const showMobileNavigation = shouldShowMobileNavigation(view);
+  const activeMobileNavigationItem = getActiveMobileNavigationItem(view);
+
+  const handleMobileNavigation = (item: MobileNavigationItem) => {
+    if (item === 'dashboard') {
+      goHome();
+    } else if (item === 'history') {
+      openHistory();
+    } else {
+      setView(item);
+    }
+  };
+
   return (
-    <>
+    <div className={`app-shell ${showMobileNavigation ? 'has-mobile-navigation' : ''}`}>
       {view === 'loading' && <LoadingView />}
       {view === 'login' && <LoginView onLogin={handleLogin} />}
       {view === 'dashboard' && (
@@ -2975,7 +3083,13 @@ function App() {
           onLogout={handleLogout}
         />
       )}
-      <footer className="site-footer">
+      {showMobileNavigation && (
+        <MobileBottomNav
+          activeItem={activeMobileNavigationItem}
+          onNavigate={handleMobileNavigation}
+        />
+      )}
+      <footer className={`site-footer ${showMobileNavigation ? 'with-mobile-navigation' : ''}`}>
         <span className="app-version">Interview Agent {APP_VERSION}</span>
         <a className="beian-link" href="https://beian.miit.gov.cn" target="_blank" rel="noopener noreferrer">
           浙ICP备2026035635号
@@ -2990,7 +3104,7 @@ function App() {
           <span>浙公网安备33019202003045号</span>
         </a>
       </footer>
-    </>
+    </div>
   );
 }
 
