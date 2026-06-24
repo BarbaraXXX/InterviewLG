@@ -83,6 +83,11 @@ async def _lifespan(app: FastAPI):
             "AUTH_SECRET_KEY is still the default 'change-me-in-production'. "
             "Set a strong secret key via AUTH_SECRET_KEY in your .env file."
         )
+    if admin_auth_settings.secret_key == "change-me-admin-production":
+        raise RuntimeError(
+            "ADMIN_AUTH_SECRET_KEY is still the default 'change-me-admin-production'. "
+            "Set a strong secret key via ADMIN_AUTH_SECRET_KEY in your .env file."
+        )
     await init_db()
     await migrate_users_if_needed()
     yield

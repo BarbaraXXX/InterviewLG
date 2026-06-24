@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import getpass
+import sys
 
 from interview_agent.admin_auth import create_admin_user
 from interview_agent.db import init_db
@@ -24,7 +25,11 @@ def main() -> int:
 
     args = parser.parse_args()
     if args.command == "create-user":
-        admin_id = asyncio.run(_create_user(args.username))
+        try:
+            admin_id = asyncio.run(_create_user(args.username))
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
         print(f"Admin user created: id={admin_id} username={args.username}")
         return 0
     parser.error("unknown command")

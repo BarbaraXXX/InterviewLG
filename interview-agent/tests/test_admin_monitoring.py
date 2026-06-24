@@ -1,7 +1,9 @@
 import anyio
 import bcrypt
+import pytest
 from fastapi.testclient import TestClient
 
+from interview_agent import admin_cli
 from interview_agent import server as server_module
 from interview_agent.admin_auth import create_admin_user
 from interview_agent.auth import get_current_user
@@ -48,6 +50,26 @@ def test_admin_login_sets_independent_cookie_and_me(isolate_env):
     me_resp = client.get("/api/admin/auth/me")
     assert me_resp.status_code == 200
     assert me_resp.json() == {"username": "ops"}
+
+
+def test_admin_cli_reports_validation_errors_without_traceback(isolate_env, monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["interview-agent-admin", "create-user", "ops"])
+    monkeypatch.setattr(admin_cli.getpass, "getpass", lambda prompt: "short")
+
+    exit_code = admin_cli.main()
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "Invalid admin password" in captured.err
+    assert "Traceback" not in captured.err
+
+
+async def test_lifespan_rejects_default_admin_secret(isolate_env, monkeypatch):
+    monkeypatch.setattr(server_module.admin_auth_settings, "secret_key", "change-me-admin-production")
+
+    with pytest.raises(RuntimeError, match="ADMIN_AUTH_SECRET_KEY"):
+        async with server_module._lifespan(server_module.app):
+            pass
 
 
 def test_regular_user_cookie_cannot_access_admin_metrics(isolate_env):
