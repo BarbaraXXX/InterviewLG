@@ -2,6 +2,7 @@
 
 import logging
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosqlite
@@ -23,6 +24,15 @@ _MAX_MESSAGES_PER_SESSION = 200
 _MAX_SESSIONS_AFTER_RETENTION = 50
 _MAX_SESSIONS_BEFORE_RETENTION = 55
 _MAX_RESUMES_PER_USER = 3
+_USAGE_METRICS = (
+    "login_success",
+    "session_created",
+    "chat_turn",
+    "speech_transcribed",
+    "coding_submitted",
+    "session_completed",
+    "session_paused",
+)
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -43,6 +53,15 @@ async def init_db() -> None:
                 username TEXT NOT NULL UNIQUE,
                 password_hash TEXT NOT NULL,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                disabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                last_login_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -166,6 +185,24 @@ async def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS user_presence (
+                user_id INTEGER PRIMARY KEY,
+                username TEXT NOT NULL,
+                current_view TEXT NOT NULL DEFAULT '',
+                active_session_id TEXT NOT NULL DEFAULT '',
+                last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS daily_usage_stats (
+                stat_date TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (stat_date, metric)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
             CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
             CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(id, user_id);
@@ -179,6 +216,8 @@ async def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_user_memories_user ON user_memories(user_id, updated_at);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_user_memories_unique_key
                 ON user_memories(user_id, memory_type, memory_key);
+            CREATE INDEX IF NOT EXISTS idx_user_presence_last_seen ON user_presence(last_seen_at);
+            CREATE INDEX IF NOT EXISTS idx_daily_usage_stats_date ON daily_usage_stats(stat_date);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_coding_tasks_one_active
                 ON coding_tasks(session_id) WHERE status = 'active';
         """)
@@ -247,6 +286,50 @@ async def get_user_by_id(user_id: int) -> dict | None:
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+# ── admin users ────────────────────────────────────────────────────
+
+
+async def create_admin_user(username: str, password_hash: str) -> int:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "INSERT INTO admin_users (username, password_hash) VALUES (?, ?)",
+            (username, password_hash),
+        )
+        await db.commit()
+        admin_id = cursor.lastrowid
+        logger.info("admin user created id=%d username=%s", admin_id, username)
+        return admin_id
+    finally:
+        await db.close()
+
+
+async def get_admin_user_by_username(username: str) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT id, username, password_hash, disabled, created_at, last_login_at "
+            "FROM admin_users WHERE username = ?",
+            (username,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def update_admin_last_login(username: str) -> None:
+    db = await get_db()
+    try:
+        await db.execute(
+            "UPDATE admin_users SET last_login_at = datetime('now') WHERE username = ?",
+            (username,),
+        )
+        await db.commit()
     finally:
         await db.close()
 
@@ -739,6 +822,155 @@ async def delete_sessions_for_user(session_ids: list[str], user_id: int) -> list
         return owned_ids
     finally:
         await db.close()
+
+
+# ── lightweight monitoring ─────────────────────────────────────────
+
+
+def _utc_date(offset_days: int = 0) -> str:
+    return (datetime.now(UTC).date() + timedelta(days=offset_days)).isoformat()
+
+
+async def update_user_presence(
+    user_id: int,
+    username: str,
+    current_view: str = "",
+    active_session_id: str = "",
+) -> None:
+    safe_view = current_view.strip()[:64]
+    safe_session_id = active_session_id.strip()[:128]
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO user_presence "
+            "(user_id, username, current_view, active_session_id, last_seen_at, updated_at) "
+            "VALUES (?, ?, ?, ?, datetime('now'), datetime('now')) "
+            "ON CONFLICT(user_id) DO UPDATE SET "
+            "username = excluded.username, "
+            "current_view = excluded.current_view, "
+            "active_session_id = excluded.active_session_id, "
+            "last_seen_at = datetime('now'), "
+            "updated_at = datetime('now')",
+            (user_id, username, safe_view, safe_session_id),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_presence_for_user(user_id: int) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT user_id, username, current_view, active_session_id, last_seen_at, updated_at "
+            "FROM user_presence WHERE user_id = ?",
+            (user_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+    finally:
+        await db.close()
+
+
+async def list_recent_presence(online_minutes: int = 5, recent_minutes: int = 15) -> list[dict]:
+    online_minutes = max(1, min(online_minutes, 60))
+    recent_minutes = max(online_minutes, min(recent_minutes, 180))
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT user_id, username, current_view, active_session_id, last_seen_at, updated_at, "
+            "CASE WHEN datetime(last_seen_at) >= datetime('now', ?) THEN 'online' ELSE 'recent' END AS status "
+            "FROM user_presence "
+            "WHERE datetime(last_seen_at) >= datetime('now', ?) "
+            "ORDER BY datetime(last_seen_at) DESC",
+            (f"-{online_minutes} minutes", f"-{recent_minutes} minutes"),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+    finally:
+        await db.close()
+
+
+async def increment_usage_metric(metric: str) -> None:
+    if metric not in _USAGE_METRICS:
+        logger.warning("ignored unknown usage metric=%s", metric)
+        return
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO daily_usage_stats (stat_date, metric, count, updated_at) "
+            "VALUES (date('now'), ?, 1, datetime('now')) "
+            "ON CONFLICT(stat_date, metric) DO UPDATE SET "
+            "count = count + 1, updated_at = datetime('now')",
+            (metric,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def get_usage_count(metric: str, stat_date: str | None = None) -> int:
+    stat_date = stat_date or _utc_date()
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT count FROM daily_usage_stats WHERE stat_date = ? AND metric = ?",
+            (stat_date, metric),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return int(row["count"]) if row else 0
+    finally:
+        await db.close()
+
+
+async def list_daily_usage(days: int = 7) -> list[dict]:
+    safe_days = max(1, min(days, 30))
+    start_date = _utc_date(-(safe_days - 1))
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT stat_date, metric, count FROM daily_usage_stats "
+            "WHERE stat_date >= ? ORDER BY stat_date ASC, metric ASC",
+            (start_date,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+    finally:
+        await db.close()
+
+    by_date = {
+        _utc_date(-(safe_days - 1 - idx)): {metric: 0 for metric in _USAGE_METRICS}
+        for idx in range(safe_days)
+    }
+    for row in rows:
+        metrics = by_date.setdefault(row["stat_date"], {metric: 0 for metric in _USAGE_METRICS})
+        metrics[row["metric"]] = int(row["count"])
+    return [{"date": stat_date, "metrics": metrics} for stat_date, metrics in sorted(by_date.items())]
+
+
+async def get_monitoring_overview() -> dict:
+    presence = await list_recent_presence()
+    daily_usage = await list_daily_usage(days=1)
+    today = daily_usage[-1]["metrics"] if daily_usage else {metric: 0 for metric in _USAGE_METRICS}
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT "
+            "SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_sessions, "
+            "SUM(CASE WHEN status = 'paused' THEN 1 ELSE 0 END) AS paused_sessions "
+            "FROM sessions"
+        ) as cursor:
+            row = await cursor.fetchone()
+    finally:
+        await db.close()
+    active_sessions = int(row["active_sessions"] or 0) if row else 0
+    paused_sessions = int(row["paused_sessions"] or 0) if row else 0
+    return {
+        "online_users": sum(1 for item in presence if item["status"] == "online"),
+        "recent_users": len(presence),
+        "active_sessions": active_sessions,
+        "paused_sessions": paused_sessions,
+        "today": today,
+    }
 
 
 # ── resumes ────────────────────────────────────────────────────────

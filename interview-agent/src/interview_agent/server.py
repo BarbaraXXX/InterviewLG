@@ -14,8 +14,10 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from interview_agent.admin_auth import authenticate_admin, get_current_admin
 from interview_agent.auth import authenticate, get_current_user, register
 from interview_agent.config import (
+    admin_auth_settings,
     auth_settings,
     context_settings,
     llm_settings,
@@ -32,19 +34,24 @@ from interview_agent.db import (
     delete_resume_for_user,
     get_active_coding_task,
     get_coding_task_for_user,
+    get_monitoring_overview,
     get_resume_for_user,
     get_session_for_user,
     get_session_messages,
     get_session_state,
     get_user_by_username,
     get_user_interview_config,
+    increment_usage_metric,
     init_db,
+    list_daily_usage,
+    list_recent_presence,
     list_session_coding_tasks,
     list_user_resumes,
     list_user_sessions,
     save_coding_task_draft_for_user,
     submit_coding_task_for_user,
     update_resume,
+    update_user_presence,
     upsert_user_interview_config,
 )
 from interview_agent.logging_config import setup_logging
@@ -108,6 +115,16 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class AdminLoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class PresenceHeartbeatRequest(BaseModel):
+    current_view: str = ""
+    active_session_id: str = ""
+
+
 def _set_auth_cookie(response: Response, token: str) -> None:
     response.set_cookie(
         key=auth_settings.cookie_name,
@@ -128,6 +145,35 @@ def _clear_auth_cookie(response: Response) -> None:
         samesite=auth_settings.cookie_samesite,
         path="/",
     )
+
+
+def _set_admin_auth_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=admin_auth_settings.cookie_name,
+        value=token,
+        max_age=admin_auth_settings.token_expire_hours * 3600,
+        httponly=True,
+        secure=admin_auth_settings.cookie_secure,
+        samesite=admin_auth_settings.cookie_samesite,
+        path="/",
+    )
+
+
+def _clear_admin_auth_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=admin_auth_settings.cookie_name,
+        httponly=True,
+        secure=admin_auth_settings.cookie_secure,
+        samesite=admin_auth_settings.cookie_samesite,
+        path="/",
+    )
+
+
+async def _increment_usage_safely(metric: str) -> None:
+    try:
+        await increment_usage_metric(metric)
+    except Exception:
+        logger.warning("usage metric update failed metric=%s", metric, exc_info=True)
 
 
 @app.post("/api/auth/register")
@@ -160,6 +206,7 @@ async def api_login(request: Request, response: Response, req: LoginRequest) -> 
     except ValueError:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     _set_auth_cookie(response, token)
+    await _increment_usage_safely("login_success")
     return {"username": req.username.strip()}
 
 
@@ -172,6 +219,57 @@ async def api_logout(response: Response) -> dict:
 @app.get("/api/auth/me")
 async def api_me(username: str = Depends(get_current_user)) -> dict:
     return {"username": username}
+
+
+@app.post("/api/admin/auth/login")
+@limiter.limit("5/minute")
+async def api_admin_login(request: Request, response: Response, req: AdminLoginRequest) -> dict:
+    try:
+        token = await authenticate_admin(req.username, req.password)
+    except HTTPException:
+        raise
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    _set_admin_auth_cookie(response, token)
+    return {"username": req.username.strip()}
+
+
+@app.post("/api/admin/auth/logout")
+async def api_admin_logout(response: Response) -> dict:
+    _clear_admin_auth_cookie(response)
+    return {"ok": True}
+
+
+@app.get("/api/admin/auth/me")
+async def api_admin_me(username: str = Depends(get_current_admin)) -> dict:
+    return {"username": username}
+
+
+@app.post("/api/presence/heartbeat")
+async def heartbeat_presence(req: PresenceHeartbeatRequest, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    await update_user_presence(
+        user["id"],
+        user["username"],
+        current_view=req.current_view,
+        active_session_id=req.active_session_id,
+    )
+    return {"ok": True}
+
+
+@app.get("/api/admin/metrics/overview")
+async def admin_metrics_overview(username: str = Depends(get_current_admin)) -> dict:
+    return await get_monitoring_overview()
+
+
+@app.get("/api/admin/presence")
+async def admin_presence(username: str = Depends(get_current_admin)) -> dict:
+    return {"users": await list_recent_presence()}
+
+
+@app.get("/api/admin/usage/daily")
+async def admin_daily_usage(days: int = 7, username: str = Depends(get_current_admin)) -> dict:
+    return {"days": await list_daily_usage(days)}
 
 
 @app.post("/api/speech/transcribe")
@@ -218,6 +316,7 @@ async def transcribe_speech(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     logger.info("speech transcription done user=%s text_len=%d", username, len(result.text))
+    await _increment_usage_safely("speech_transcribed")
     return {"text": result.text, "duration_ms": duration_ms}
 
 
@@ -741,6 +840,7 @@ async def create_session(
         "create_session user=%s session=%s domain=%s difficulty=%s jd_len=%d profile_len=%d",
         username, session_id, req.domain, req.difficulty, len(structured_jd), len(structured_profile),
     )
+    await _increment_usage_safely("session_created")
     messages = await get_session_messages(session_id)
     return {"session_id": session_id, "messages": messages}
 
@@ -882,6 +982,7 @@ async def submit_coding_task(task_id: str, req: CodingTaskSubmitRequest, usernam
     task = await submit_coding_task_for_user(task_id, user["id"], language, code)
     if task is None:
         raise HTTPException(status_code=409, detail="Coding task has already been submitted")
+    await _increment_usage_safely("coding_submitted")
     return {
         "task": _serialize_coding_task(task),
         "context_message": _build_code_submission_context(task, language, code),
@@ -914,6 +1015,7 @@ async def end_session(session_id: str, username: str = Depends(get_current_user)
         raise HTTPException(status_code=404, detail="Session not found")
     await session_manager.end_session(session_id)
     _CONTEXT_USAGE_CACHE.pop(session_id, None)
+    await _increment_usage_safely("session_completed")
     asyncio.create_task(update_user_memory_safely(user["id"], session_id))
     return {"ok": True}
 
@@ -928,6 +1030,7 @@ async def pause_session(session_id: str, username: str = Depends(get_current_use
         raise HTTPException(status_code=409, detail="Only active sessions can be paused")
     await session_manager.pause_session(session_id)
     _CONTEXT_USAGE_CACHE.pop(session_id, None)
+    await _increment_usage_safely("session_paused")
     return {"ok": True}
 
 
@@ -976,6 +1079,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
     display_message = req.message.strip()
     context_message = req.context_message.strip()
     await session_manager.append_message(req.session_id, "user", display_message)
+    await _increment_usage_safely("chat_turn")
     active_coding_task = await get_active_coding_task(req.session_id)
     await advance_session_state(
         req.session_id,

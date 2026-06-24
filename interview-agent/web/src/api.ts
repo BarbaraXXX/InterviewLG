@@ -101,6 +101,29 @@ export interface SpeechTranscriptionResult {
   duration_ms: number | null;
 }
 
+export interface AdminOverview {
+  online_users: number;
+  recent_users: number;
+  active_sessions: number;
+  paused_sessions: number;
+  today: Record<string, number>;
+}
+
+export interface AdminPresenceUser {
+  user_id: number;
+  username: string;
+  current_view: string;
+  active_session_id: string;
+  last_seen_at: string;
+  updated_at: string;
+  status: 'online' | 'recent';
+}
+
+export interface AdminDailyUsage {
+  date: string;
+  metrics: Record<string, number>;
+}
+
 function authHeaders(): Record<string, string> {
   return { 'Content-Type': 'application/json' };
 }
@@ -146,6 +169,73 @@ export async function logout(): Promise<void> {
     method: 'POST',
     credentials: 'same-origin',
   });
+}
+
+export async function adminLogin(username: string, password: string): Promise<{ username: string }> {
+  const res = await fetch(`${API_BASE}/admin/auth/login`, {
+    method: 'POST',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || 'Admin login failed');
+  }
+  return res.json();
+}
+
+export async function adminLogout(): Promise<void> {
+  await fetch(`${API_BASE}/admin/auth/logout`, {
+    method: 'POST',
+    credentials: 'same-origin',
+  });
+}
+
+export async function getAdminMe(): Promise<{ username: string } | null> {
+  const res = await fetch(`${API_BASE}/admin/auth/me`, {
+    credentials: 'same-origin',
+  });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function sendPresenceHeartbeat(currentView: string, activeSessionId: string = ''): Promise<void> {
+  await fetch(`${API_BASE}/presence/heartbeat`, {
+    method: 'POST',
+    headers: authHeaders(),
+    credentials: 'same-origin',
+    body: JSON.stringify({ current_view: currentView, active_session_id: activeSessionId }),
+  });
+}
+
+export async function fetchAdminOverview(): Promise<AdminOverview> {
+  const res = await fetch(`${API_BASE}/admin/metrics/overview`, {
+    credentials: 'same-origin',
+  });
+  if (res.status === 401 || res.status === 403) throw new Error('ADMIN_UNAUTHORIZED');
+  if (!res.ok) throw new Error('Failed to fetch admin overview');
+  return res.json();
+}
+
+export async function fetchAdminPresence(): Promise<AdminPresenceUser[]> {
+  const res = await fetch(`${API_BASE}/admin/presence`, {
+    credentials: 'same-origin',
+  });
+  if (res.status === 401 || res.status === 403) throw new Error('ADMIN_UNAUTHORIZED');
+  if (!res.ok) throw new Error('Failed to fetch admin presence');
+  const data = await res.json();
+  return data.users || [];
+}
+
+export async function fetchAdminDailyUsage(days: number = 7): Promise<AdminDailyUsage[]> {
+  const res = await fetch(`${API_BASE}/admin/usage/daily?days=${days}`, {
+    credentials: 'same-origin',
+  });
+  if (res.status === 401 || res.status === 403) throw new Error('ADMIN_UNAUTHORIZED');
+  if (!res.ok) throw new Error('Failed to fetch admin usage');
+  const data = await res.json();
+  return data.days || [];
 }
 
 export async function fetchDomains(): Promise<string[]> {

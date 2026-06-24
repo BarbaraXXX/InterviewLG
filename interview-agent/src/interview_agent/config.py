@@ -90,6 +90,21 @@ class AuthSettings(BaseSettings):
         return [c.strip() for c in self.invite_codes.split(",") if c.strip()]
 
 
+class AdminAuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="ADMIN_AUTH_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    secret_key: str = "change-me-admin-production"
+    token_expire_hours: int = 8
+    cookie_name: str = "interviewlg_admin_token"
+    cookie_secure: bool = False
+    cookie_samesite: str = "lax"
+
+
 class VectorDBSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="VECTORDB_",
@@ -245,6 +260,7 @@ class ServerSettings(BaseSettings):
 llm_settings = LLMSettings()
 mcp_settings = MCPSettings()
 auth_settings = AuthSettings()
+admin_auth_settings = AdminAuthSettings()
 vectordb_settings = VectorDBSettings()
 rag_settings = RAGSettings()
 context_settings = ContextSettings()

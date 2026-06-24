@@ -15,6 +15,7 @@ os.environ.setdefault(
     ),
 )
 os.environ.setdefault("AUTH_SECRET_KEY", "test-secret-key-for-unit-tests-only")
+os.environ.setdefault("ADMIN_AUTH_SECRET_KEY", "test-admin-secret-key-for-unit-tests-only")
 os.environ.setdefault("MCP_SERVER_URLS", "")
 os.environ.setdefault("VECTORDB_BASE_URL", "http://localhost:1")
 
@@ -38,6 +39,7 @@ def isolate_env(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setenv("AUTH_SECRET_KEY", "test-secret-key-for-unit-tests-only")
+    monkeypatch.setenv("ADMIN_AUTH_SECRET_KEY", "test-admin-secret-key-for-unit-tests-only")
     monkeypatch.setenv("MCP_SERVER_URLS", "")
     monkeypatch.setenv("VECTORDB_BASE_URL", "http://localhost:1")
 

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --disable-warning=ExperimentalWarning --test src/mobileNavigation.test.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test src/mobileNavigation.test.ts src/adminRouting.test.ts",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{js,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{js,json}\"",
     "lint": "eslint .",

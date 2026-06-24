@@ -1,12 +1,17 @@
 import { lazy, Suspense, useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowRight, ChevronDown, FileText, Play, RotateCcw, Sparkles } from 'lucide-react';
+import { Activity, ArrowRight, BarChart3, ChevronDown, FileText, Play, RefreshCw, RotateCcw, ShieldCheck, Sparkles, Users } from 'lucide-react';
 import {
+  adminLogin,
+  adminLogout,
   createSession,
   createResume,
   deleteInterviewSession,
   deleteInterviewSessions,
   deleteResume,
   endInterviewSession,
+  fetchAdminDailyUsage,
+  fetchAdminOverview,
+  fetchAdminPresence,
   fetchActiveCodingTask,
   fetchContextUsage,
   fetchDomains,
@@ -15,16 +20,21 @@ import {
   fetchLastInterviewConfig,
   fetchProfiles,
   fetchResumes,
+  getAdminMe,
   getMe,
   login,
   logout,
   pauseInterviewSession,
   register,
   resumeInterviewSession,
+  sendPresenceHeartbeat,
   streamChat,
   transcribeSpeech,
   submitCodingTask,
   updateResume,
+  type AdminDailyUsage,
+  type AdminOverview,
+  type AdminPresenceUser,
   type CodingTask,
   type ContextUsage,
   type InterviewMessage,
@@ -34,6 +44,7 @@ import {
   type Resume,
   type ResumeProject,
 } from './api';
+import { isAdminPath } from './adminRouting';
 import { CODING_LANGUAGE_LABELS } from './codingLanguages';
 import MarkdownMessage from './MarkdownMessage';
 import MobileBottomNav from './MobileBottomNav';
@@ -70,6 +81,7 @@ const MAX_SPEECH_RECORDING_MS = 120000;
 const SPEECH_SIGNAL_RMS_THRESHOLD = 0.018;
 const SPEECH_MIN_ACTIVE_MS = 250;
 const SPEECH_METER_UI_INTERVAL_MS = 100;
+const PRESENCE_HEARTBEAT_MS = 90000;
 
 type BrowserWindowWithAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
@@ -2844,7 +2856,353 @@ function LoadingView() {
   );
 }
 
-function App() {
+const ADMIN_METRIC_LABELS: Record<string, string> = {
+  login_success: '登录成功',
+  session_created: '新增面试',
+  chat_turn: '对话轮次',
+  speech_transcribed: '语音转写',
+  coding_submitted: '手撕提交',
+  session_completed: '完成面试',
+  session_paused: '中断面试',
+};
+
+function AdminLoginView({
+  theme,
+  onToggleTheme,
+  onLogin,
+}: {
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+  onLogin: (username: string) => void;
+}) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const result = await adminLogin(username, password);
+      onLogin(result.username);
+      window.history.replaceState(null, '', '/admin');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '管理员登录失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="admin-auth-shell">
+      <section className="admin-auth-intro">
+        <LogoMark />
+        <p className="eyebrow">Admin Console</p>
+        <h1>Interview Agent 监控后台</h1>
+        <p>独立管理员入口，只展示在线状态和聚合使用情况，不展示用户面试内容、简历正文或代码全文。</p>
+      </section>
+      <section className="admin-auth-card" aria-label="管理员登录">
+        <div className="admin-auth-card-head">
+          <div>
+            <p className="eyebrow">Secure Access</p>
+            <h2>管理员登录</h2>
+          </div>
+          <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        </div>
+        <form className="login-form" onSubmit={handleSubmit}>
+          <div className="login-field">
+            <label className="section-label" htmlFor="admin-username">管理员账号</label>
+            <input
+              id="admin-username"
+              type="text"
+              className="custom-input"
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              autoComplete="username"
+              required
+            />
+          </div>
+          <div className="login-field">
+            <label className="section-label" htmlFor="admin-password">密码</label>
+            <input
+              id="admin-password"
+              type="password"
+              className="custom-input"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </div>
+          {error && <div className="login-error" role="alert">{error}</div>}
+          <button className="start-button" type="submit" disabled={loading || !username || !password}>
+            {loading ? '验证中...' : '进入监控后台'}
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function AdminDashboardView({
+  username,
+  theme,
+  onToggleTheme,
+  onLogout,
+}: {
+  username: string;
+  theme: ThemeMode;
+  onToggleTheme: () => void;
+  onLogout: () => void;
+}) {
+  const [overview, setOverview] = useState<AdminOverview | null>(null);
+  const [presence, setPresence] = useState<AdminPresenceUser[]>([]);
+  const [usage, setUsage] = useState<AdminDailyUsage[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const applyAdminData = useCallback((
+    overviewData: AdminOverview,
+    presenceData: AdminPresenceUser[],
+    usageData: AdminDailyUsage[],
+  ) => {
+    setOverview(overviewData);
+    setPresence(presenceData);
+    setUsage(usageData);
+    setError('');
+  }, []);
+
+  const loadAdminData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [overviewData, presenceData, usageData] = await Promise.all([
+        fetchAdminOverview(),
+        fetchAdminPresence(),
+        fetchAdminDailyUsage(7),
+      ]);
+      applyAdminData(overviewData, presenceData, usageData);
+    } catch (err) {
+      if (err instanceof Error && err.message === 'ADMIN_UNAUTHORIZED') {
+        onLogout();
+      } else {
+        setError('监控数据加载失败，请稍后刷新。');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [applyAdminData, onLogout]);
+
+  useEffect(() => {
+    let ignore = false;
+    Promise.all([fetchAdminOverview(), fetchAdminPresence(), fetchAdminDailyUsage(7)])
+      .then(([overviewData, presenceData, usageData]) => {
+        if (!ignore) applyAdminData(overviewData, presenceData, usageData);
+      })
+      .catch((err) => {
+        if (ignore) return;
+        if (err instanceof Error && err.message === 'ADMIN_UNAUTHORIZED') {
+          onLogout();
+        } else {
+          setError('监控数据加载失败，请稍后刷新。');
+        }
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [applyAdminData, onLogout]);
+
+  const today = overview?.today || {};
+  const maxDailyChat = Math.max(1, ...usage.map((day) => day.metrics.chat_turn || 0));
+
+  return (
+    <div className="setup-view admin-monitor-view">
+      <div className="console-shell admin-monitor-shell">
+        <header className="console-topbar admin-topbar">
+          <div className="brand-lockup">
+            <LogoMark />
+            <span>Interview Agent 管理后台</span>
+          </div>
+          <div className="user-badge">
+            <span className="system-pill">Admin</span>
+            <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+            <span className="user-badge-name">{username}</span>
+            <button className="logout-link" onClick={onLogout}>退出</button>
+          </div>
+        </header>
+
+        <main className="admin-monitor-grid">
+          <section className="admin-hero">
+            <div>
+              <p className="eyebrow">Operations</p>
+              <h1>站点使用情况概览</h1>
+              <p>用于部署前检查和日常观察，只展示低敏聚合信息。</p>
+            </div>
+            <button className="secondary-button admin-refresh-button" onClick={() => void loadAdminData()} disabled={loading}>
+              <RefreshCw size={16} aria-hidden="true" />
+              <span>{loading ? '刷新中' : '刷新'}</span>
+            </button>
+          </section>
+
+          {error && <div className="login-error admin-error" role="alert">{error}</div>}
+
+          <section className="admin-metric-grid" aria-label="关键指标">
+            <article className="admin-metric-card">
+              <Users size={20} aria-hidden="true" />
+              <span>当前在线</span>
+              <strong>{overview?.online_users ?? '-'}</strong>
+              <small>5 分钟内 heartbeat</small>
+            </article>
+            <article className="admin-metric-card">
+              <Activity size={20} aria-hidden="true" />
+              <span>最近活跃</span>
+              <strong>{overview?.recent_users ?? '-'}</strong>
+              <small>15 分钟内活动用户</small>
+            </article>
+            <article className="admin-metric-card">
+              <ShieldCheck size={20} aria-hidden="true" />
+              <span>进行中面试</span>
+              <strong>{overview?.active_sessions ?? '-'}</strong>
+              <small>active 状态会话</small>
+            </article>
+            <article className="admin-metric-card">
+              <BarChart3 size={20} aria-hidden="true" />
+              <span>今日对话</span>
+              <strong>{today.chat_turn ?? 0}</strong>
+              <small>用户发送轮次</small>
+            </article>
+          </section>
+
+          <section className="admin-panel admin-presence-panel" aria-label="在线用户">
+            <div className="admin-panel-head">
+              <div>
+                <p className="eyebrow">Presence</p>
+                <h2>在线与最近活跃</h2>
+              </div>
+              <span>{presence.length} 人</span>
+            </div>
+            <div className="admin-presence-list">
+              {presence.length === 0 && <div className="history-empty">暂无最近活跃用户。</div>}
+              {presence.map((user) => (
+                <article className="admin-presence-row" key={user.user_id}>
+                  <div>
+                    <strong>{user.username}</strong>
+                    <small>{user.current_view || 'unknown'}{user.active_session_id ? ` · ${user.active_session_id.slice(0, 8)}` : ''}</small>
+                  </div>
+                  <span className={`admin-presence-status ${user.status}`}>{user.status === 'online' ? '在线' : '最近活跃'}</span>
+                  <time>{formatDateTime(user.last_seen_at)}</time>
+                </article>
+              ))}
+            </div>
+          </section>
+
+          <section className="admin-panel admin-usage-panel" aria-label="今日使用统计">
+            <div className="admin-panel-head">
+              <div>
+                <p className="eyebrow">Today</p>
+                <h2>今日使用统计</h2>
+              </div>
+            </div>
+            <div className="admin-usage-grid">
+              {Object.entries(ADMIN_METRIC_LABELS).map(([metric, label]) => (
+                <div className="admin-usage-item" key={metric}>
+                  <span>{label}</span>
+                  <strong>{today[metric] ?? 0}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="admin-panel admin-trend-panel" aria-label="最近七天趋势">
+            <div className="admin-panel-head">
+              <div>
+                <p className="eyebrow">7 Days</p>
+                <h2>最近七天对话趋势</h2>
+              </div>
+            </div>
+            <div className="admin-trend-list">
+              {usage.map((day) => {
+                const chatTurns = day.metrics.chat_turn || 0;
+                return (
+                  <div className="admin-trend-row" key={day.date}>
+                    <time>{day.date.slice(5)}</time>
+                    <div className="admin-trend-track" aria-hidden="true">
+                      <span style={{ width: `${Math.max(4, Math.round((chatTurns / maxDailyChat) * 100))}%` }} />
+                    </div>
+                    <strong>{chatTurns}</strong>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function AdminApp() {
+  const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
+  const [username, setUsername] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [path, setPath] = useState(() => window.location.pathname);
+
+  useEffect(() => {
+    persistTheme(theme);
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
+  };
+
+  useEffect(() => {
+    let ignore = false;
+    void getAdminMe()
+      .then((me) => {
+        if (ignore) return;
+        if (me) {
+          setUsername(me.username);
+          if (window.location.pathname === '/admin/login') {
+            window.history.replaceState(null, '', '/admin');
+          }
+          setPath(window.location.pathname);
+        } else {
+          setUsername('');
+          if (window.location.pathname !== '/admin/login') {
+            window.history.replaceState(null, '', '/admin/login');
+          }
+          setPath(window.location.pathname);
+        }
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  const handleLogin = (adminUsername: string) => {
+    setUsername(adminUsername);
+    setPath('/admin');
+  };
+
+  const handleLogout = useCallback(async () => {
+    await adminLogout().catch(() => undefined);
+    setUsername('');
+    window.history.replaceState(null, '', '/admin/login');
+    setPath('/admin/login');
+  }, []);
+
+  if (loading) return <LoadingView />;
+  if (!username || path === '/admin/login') {
+    return <AdminLoginView theme={theme} onToggleTheme={toggleTheme} onLogin={handleLogin} />;
+  }
+  return <AdminDashboardView username={username} theme={theme} onToggleTheme={toggleTheme} onLogout={handleLogout} />;
+}
+
+function UserApp() {
   const [view, setView] = useState<View>(() => (hasActiveBrowserSession() ? 'loading' : 'login'));
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [sessionId, setSessionId] = useState('');
@@ -2885,6 +3243,23 @@ function App() {
         setView('login');
       });
   }, []);
+
+  useEffect(() => {
+    if (!username || view === 'loading' || view === 'login') return;
+
+    const sendHeartbeat = () => {
+      if (document.visibilityState === 'hidden') return;
+      void sendPresenceHeartbeat(view, view === 'chat' ? sessionId : '').catch(() => undefined);
+    };
+
+    sendHeartbeat();
+    const intervalId = window.setInterval(sendHeartbeat, PRESENCE_HEARTBEAT_MS);
+    document.addEventListener('visibilitychange', sendHeartbeat);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', sendHeartbeat);
+    };
+  }, [sessionId, username, view]);
 
   const handleLogin = (user: string) => {
     markActiveBrowserSession();
@@ -3106,6 +3481,13 @@ function App() {
       </footer>
     </div>
   );
+}
+
+function App() {
+  if (isAdminPath(window.location.pathname)) {
+    return <AdminApp />;
+  }
+  return <UserApp />;
 }
 
 export default App;

@@ -24,6 +24,22 @@
 - 当前仅新增设计文档，不改变代码、数据库、接口和部署流程。
 - 后续实现时需要新增管理员表、presence 表、daily usage 聚合表和 `/api/admin/...` 接口。
 
+### 独立管理员监控后台实现
+
+- 新增独立管理员账号体系，使用 `admin_users` 表、独立管理员 JWT secret 和独立 `interviewlg_admin_token` cookie。
+- 新增 `interview-agent-admin create-user <username>` 命令，通过交互式密码创建管理员账号，不开放网页注册。
+- 新增 `/admin/login` 与 `/admin` 前端入口，后台页面与普通用户系统分流，不复用普通 Dashboard。
+- 新增用户在线 heartbeat，普通用户登录后低频上报当前页面和活动面试 ID，用于判断在线与最近活跃状态。
+- 新增 `daily_usage_stats` 聚合统计表，记录登录、创建面试、对话轮次、语音转写、手撕提交、完成和中断等低敏计数。
+- 新增 `/api/admin/metrics/overview`、`/api/admin/presence`、`/api/admin/usage/daily` 管理接口，只允许管理员 cookie 访问。
+- 管理后台只展示在线状态、进行中面试数量和聚合使用趋势，不展示简历正文、面试全文、代码全文、语音文本、cookie 或密码哈希。
+
+影响：
+
+- 部署后需要配置 `ADMIN_AUTH_SECRET_KEY`，并用 `uv run interview-agent-admin create-user <username>` 创建管理员账号。
+- 新增三张 SQLite 小表，不新增容器、常驻服务或外部监控组件。
+- 普通用户端增加 90 秒一次的低频 heartbeat；页面隐藏时不发送，资源消耗可控。
+
 ### 移动端 Dashboard 与全局导航设计
 
 - 根据华为 Pura 80 Pro 真机反馈重新评估移动端适配，确认主要问题来自 Dashboard 桌面信息结构在手机端纵向堆叠，而不是高分辨率导致的断点误判。

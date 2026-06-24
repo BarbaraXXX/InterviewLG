@@ -27,6 +27,7 @@ dependencies = [
 
 [project.scripts]
 interview-agent = "interview_agent.main:main"
+interview-agent-admin = "interview_agent.admin_cli:main"
 interview-agent-server = "interview_agent.server:run"
 
 [build-system]
