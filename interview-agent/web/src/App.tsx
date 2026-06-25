@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import { Activity, ArrowRight, BarChart3, ChevronDown, FileText, Play, RefreshCw, RotateCcw, ShieldCheck, Sparkles, Users } from 'lucide-react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import {
   adminLogin,
   adminLogout,
@@ -55,6 +56,7 @@ import {
   type MobileNavigationView,
 } from './mobileNavigation';
 import { RELEASE_NOTES } from './releaseNotes';
+import { routeToUserView, ROUTES, userViewToRoute } from './routes';
 import { APP_VERSION } from './version';
 
 const CodingWorkspace = lazy(() => import('./CodingWorkspace'));
@@ -2887,7 +2889,6 @@ function AdminLoginView({
     try {
       const result = await adminLogin(username, password);
       onLogin(result.username);
-      window.history.replaceState(null, '', '/admin');
     } catch (err) {
       setError(err instanceof Error ? err.message : '管理员登录失败');
     } finally {
@@ -3143,10 +3144,11 @@ function AdminDashboardView({
 }
 
 function AdminApp() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(true);
-  const [path, setPath] = useState(() => window.location.pathname);
 
   useEffect(() => {
     persistTheme(theme);
@@ -3163,16 +3165,14 @@ function AdminApp() {
         if (ignore) return;
         if (me) {
           setUsername(me.username);
-          if (window.location.pathname === '/admin/login') {
-            window.history.replaceState(null, '', '/admin');
+          if (location.pathname === ROUTES.adminLogin) {
+            navigate(ROUTES.admin, { replace: true });
           }
-          setPath(window.location.pathname);
         } else {
           setUsername('');
-          if (window.location.pathname !== '/admin/login') {
-            window.history.replaceState(null, '', '/admin/login');
+          if (location.pathname !== ROUTES.adminLogin) {
+            navigate(ROUTES.adminLogin, { replace: true });
           }
-          setPath(window.location.pathname);
         }
       })
       .finally(() => {
@@ -3181,28 +3181,30 @@ function AdminApp() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [location.pathname, navigate]);
 
   const handleLogin = (adminUsername: string) => {
     setUsername(adminUsername);
-    setPath('/admin');
+    navigate(ROUTES.admin, { replace: true });
   };
 
   const handleLogout = useCallback(async () => {
     await adminLogout().catch(() => undefined);
     setUsername('');
-    window.history.replaceState(null, '', '/admin/login');
-    setPath('/admin/login');
-  }, []);
+    navigate(ROUTES.adminLogin, { replace: true });
+  }, [navigate]);
 
   if (loading) return <LoadingView />;
-  if (!username || path === '/admin/login') {
+  if (!username || location.pathname === ROUTES.adminLogin) {
     return <AdminLoginView theme={theme} onToggleTheme={toggleTheme} onLogin={handleLogin} />;
   }
   return <AdminDashboardView username={username} theme={theme} onToggleTheme={toggleTheme} onLogout={handleLogout} />;
 }
 
 function UserApp() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const initialPathRef = useRef(location.pathname);
   const [view, setView] = useState<View>(() => (hasActiveBrowserSession() ? 'loading' : 'login'));
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [sessionId, setSessionId] = useState('');
@@ -3221,9 +3223,21 @@ function UserApp() {
     setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
   };
 
+  const navigateToView = useCallback((nextView: View, options?: { replace?: boolean }) => {
+    const route = userViewToRoute(nextView);
+    if (route && location.pathname !== route) {
+      navigate(route, { replace: options?.replace });
+    }
+    setView(nextView);
+  }, [location.pathname, navigate]);
+
   useEffect(() => {
+    const initialPath = initialPathRef.current;
     if (!hasActiveBrowserSession()) {
       void logout().catch(() => undefined);
+      if (initialPath !== ROUTES.login) {
+        navigate(ROUTES.login, { replace: true });
+      }
       return;
     }
 
@@ -3232,24 +3246,39 @@ function UserApp() {
         if (me) {
           setUsername(me.username);
           setHistoryNoticeDismissed(hasDismissedHistoryNotice());
-          setView('dashboard');
+          const requestedView = routeToUserView(initialPath);
+          const nextView = requestedView && requestedView !== 'login' ? requestedView : 'dashboard';
+          const nextRoute = userViewToRoute(nextView) ?? ROUTES.dashboard;
+          setView(nextView);
+          if (initialPath !== nextRoute) {
+            navigate(nextRoute, { replace: true });
+          }
         } else {
           clearActiveBrowserSession();
           setView('login');
+          if (initialPath !== ROUTES.login) {
+            navigate(ROUTES.login, { replace: true });
+          }
         }
       })
       .catch(() => {
         clearActiveBrowserSession();
         setView('login');
+        if (initialPath !== ROUTES.login) {
+          navigate(ROUTES.login, { replace: true });
+        }
       });
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
-    if (!username || view === 'loading' || view === 'login') return;
+    const activeView = username && view !== 'chat'
+      ? routeToUserView(location.pathname) ?? view
+      : view;
+    if (!username || activeView === 'loading' || activeView === 'login') return;
 
     const sendHeartbeat = () => {
       if (document.visibilityState === 'hidden') return;
-      void sendPresenceHeartbeat(view, view === 'chat' ? sessionId : '').catch(() => undefined);
+      void sendPresenceHeartbeat(activeView, activeView === 'chat' ? sessionId : '').catch(() => undefined);
     };
 
     sendHeartbeat();
@@ -3259,7 +3288,7 @@ function UserApp() {
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', sendHeartbeat);
     };
-  }, [sessionId, username, view]);
+  }, [location.pathname, sessionId, username, view]);
 
   const handleLogin = (user: string) => {
     markActiveBrowserSession();
@@ -3267,7 +3296,7 @@ function UserApp() {
     setUsername(user);
     setHistoryNoticeDismissed(false);
     setHistoryManageModeDefault(false);
-    setView('dashboard');
+    navigateToView('dashboard', { replace: true });
   };
 
   const handleLogout = async () => {
@@ -3277,7 +3306,7 @@ function UserApp() {
     setUsername('');
     setHistoryNoticeDismissed(false);
     setHistoryManageModeDefault(false);
-    setView('login');
+    navigateToView('login', { replace: true });
   };
 
   const handleStart = async (
@@ -3308,7 +3337,7 @@ function UserApp() {
     if (sessionId) {
       await endInterviewSession(sessionId).catch(() => undefined);
     }
-    setView('dashboard');
+    navigateToView('dashboard');
     setSessionId('');
     setChatMessages([]);
   };
@@ -3326,7 +3355,7 @@ function UserApp() {
       }
       return;
     }
-    setView('dashboard');
+    navigateToView('dashboard');
     setSessionId('');
     setChatMessages([]);
   };
@@ -3343,19 +3372,19 @@ function UserApp() {
     setSessionId('');
     setChatMessages([]);
     setHistoryManageModeDefault(false);
-    setView('dashboard');
+    navigateToView('dashboard');
   };
 
   const openHistory = () => {
     setHistoryManageModeDefault(false);
-    setView('history');
+    navigateToView('history');
   };
 
   const openHistoryManagement = () => {
     markHistoryNoticeDismissed();
     setHistoryNoticeDismissed(true);
     setHistoryManageModeDefault(true);
-    setView('history');
+    navigateToView('history');
   };
 
   const dismissHistoryNotice = () => {
@@ -3363,8 +3392,10 @@ function UserApp() {
     setHistoryNoticeDismissed(true);
   };
 
-  const showMobileNavigation = shouldShowMobileNavigation(view);
-  const activeMobileNavigationItem = getActiveMobileNavigationItem(view);
+  const routeView = username && view !== 'chat' ? routeToUserView(location.pathname) : null;
+  const activeView = routeView && routeView !== 'login' ? routeView : view;
+  const showMobileNavigation = shouldShowMobileNavigation(activeView);
+  const activeMobileNavigationItem = getActiveMobileNavigationItem(activeView);
 
   const handleMobileNavigation = (item: MobileNavigationItem) => {
     if (item === 'dashboard') {
@@ -3372,30 +3403,33 @@ function UserApp() {
     } else if (item === 'history') {
       openHistory();
     } else {
-      setView(item);
+      navigateToView(item);
     }
   };
 
   return (
     <div className={`app-shell ${showMobileNavigation ? 'has-mobile-navigation' : ''}`}>
-      {view === 'loading' && <LoadingView />}
-      {view === 'login' && <LoginView onLogin={handleLogin} />}
-      {view === 'dashboard' && (
+      {username && view !== 'loading' && view !== 'chat' && routeView === 'login' && (
+        <Navigate to={ROUTES.dashboard} replace />
+      )}
+      {activeView === 'loading' && <LoadingView />}
+      {activeView === 'login' && <LoginView onLogin={handleLogin} />}
+      {activeView === 'dashboard' && (
         <DashboardView
           username={username}
           theme={theme}
           onToggleTheme={toggleTheme}
-          onStartInterview={() => setView('setup')}
-          onProfile={() => setView('profile')}
+          onStartInterview={() => navigateToView('setup')}
+          onProfile={() => navigateToView('profile')}
           onHistory={openHistory}
           onManageHistory={openHistoryManagement}
-          onInsights={() => setView('insights')}
+          onInsights={() => navigateToView('insights')}
           onLogout={handleLogout}
           historyNoticeDismissed={historyNoticeDismissed}
           onDismissHistoryNotice={dismissHistoryNotice}
         />
       )}
-      {view === 'setup' && (
+      {activeView === 'setup' && (
         <SetupView
           onStart={handleStart}
           username={username}
@@ -3403,10 +3437,10 @@ function UserApp() {
           onToggleTheme={toggleTheme}
           onLogout={handleLogout}
           onBack={goHome}
-          onProfile={() => setView('profile')}
+          onProfile={() => navigateToView('profile')}
         />
       )}
-      {view === 'chat' && (
+      {activeView === 'chat' && (
         <ChatView
           sessionId={sessionId}
           domain={domain}
@@ -3418,29 +3452,29 @@ function UserApp() {
           onEnd={handleEnd}
         />
       )}
-      {view === 'profile' && (
+      {activeView === 'profile' && (
         <ResumeManagerView
           username={username}
           theme={theme}
           onToggleTheme={toggleTheme}
           onHome={goHome}
-          onStartInterview={() => setView('setup')}
+          onStartInterview={() => navigateToView('setup')}
           onLogout={handleLogout}
         />
       )}
-      {view === 'history' && (
+      {activeView === 'history' && (
         <HistoryView
           username={username}
           theme={theme}
           onToggleTheme={toggleTheme}
           initialManageMode={historyManageModeDefault}
           onHome={goHome}
-          onStartInterview={() => setView('setup')}
+          onStartInterview={() => navigateToView('setup')}
           onResumeInterview={handleResume}
           onLogout={handleLogout}
         />
       )}
-      {view === 'insights' && (
+      {activeView === 'insights' && (
         <PlaceholderView
           username={username}
           theme={theme}
@@ -3454,7 +3488,7 @@ function UserApp() {
             { label: 'Action', title: '改进建议', description: '输出下一阶段更适合训练的问题类型和复习重点。' },
           ]}
           onHome={goHome}
-          onStartInterview={() => setView('setup')}
+          onStartInterview={() => navigateToView('setup')}
           onLogout={handleLogout}
         />
       )}
@@ -3484,7 +3518,8 @@ function UserApp() {
 }
 
 function App() {
-  if (isAdminPath(window.location.pathname)) {
+  const location = useLocation();
+  if (isAdminPath(location.pathname)) {
     return <AdminApp />;
   }
   return <UserApp />;

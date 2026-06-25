@@ -1,3 +1,5 @@
+import { isAdminRoute } from './routes.ts';
+
 export function isAdminPath(pathname: string): boolean {
-  return pathname === '/admin' || pathname === '/admin/login';
+  return isAdminRoute(pathname);
 }
