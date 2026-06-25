@@ -3,9 +3,11 @@ import test from 'node:test';
 
 import {
   ADMIN_ROUTE_ENTRIES,
+  getRouteSessionId,
   isAdminRoute,
   routeToUserView,
   ROUTES,
+  USER_RESOURCE_ROUTE_ENTRIES,
   USER_TOP_LEVEL_ROUTE_ENTRIES,
   userViewToRoute,
 } from './routes.ts';
@@ -34,10 +36,10 @@ test('maps stable routes back to user views', () => {
   assert.equal(routeToUserView('/insights'), 'insights');
 });
 
-test('ignores unknown and resource routes for phase one', () => {
+test('maps resource routes to owning user views', () => {
   assert.equal(routeToUserView('/unknown'), null);
-  assert.equal(routeToUserView('/interview/session-1'), null);
-  assert.equal(routeToUserView('/history/session-1'), null);
+  assert.equal(routeToUserView('/interview/session-1'), 'chat');
+  assert.equal(routeToUserView('/history/session-1'), 'history');
 });
 
 test('recognizes dedicated admin routes', () => {
@@ -67,4 +69,21 @@ test('exposes complete top-level route entries for route rendering', () => {
     ADMIN_ROUTE_ENTRIES.map((entry) => entry.path),
     [ROUTES.adminLogin, ROUTES.admin],
   );
+});
+
+test('exposes resource route entries for session-scoped pages', () => {
+  assert.deepEqual(
+    USER_RESOURCE_ROUTE_ENTRIES.map((entry) => [entry.path, entry.view]),
+    [
+      ['/interview/:sessionId', 'chat'],
+      ['/history/:sessionId', 'history'],
+    ],
+  );
+});
+
+test('extracts session ids from resource paths', () => {
+  assert.equal(getRouteSessionId('/interview/session-1', 'interview'), 'session-1');
+  assert.equal(getRouteSessionId('/history/session-2', 'history'), 'session-2');
+  assert.equal(getRouteSessionId('/history/session-2', 'interview'), null);
+  assert.equal(getRouteSessionId('/history', 'history'), null);
 });

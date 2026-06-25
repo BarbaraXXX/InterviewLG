@@ -57,8 +57,10 @@ import {
 import { RELEASE_NOTES } from './releaseNotes';
 import {
   ADMIN_ROUTE_ENTRIES,
+  getRouteSessionId,
   routeToUserView,
   ROUTES,
+  USER_RESOURCE_ROUTE_ENTRIES,
   USER_TOP_LEVEL_ROUTE_ENTRIES,
   userViewToRoute,
 } from './routes';
@@ -1274,8 +1276,11 @@ function HistoryView({
   theme,
   onToggleTheme,
   initialManageMode,
+  selectedSessionId,
   onHome,
   onStartInterview,
+  onSelectSession,
+  onClearSelectedSession,
   onResumeInterview,
   onLogout,
 }: {
@@ -1283,13 +1288,16 @@ function HistoryView({
   theme: ThemeMode;
   onToggleTheme: () => void;
   initialManageMode: boolean;
+  selectedSessionId?: string;
   onHome: () => void;
   onStartInterview: () => void;
+  onSelectSession: (sessionId: string) => void;
+  onClearSelectedSession: () => void;
   onResumeInterview: (detail: InterviewSessionDetail) => void;
   onLogout: () => void;
 }) {
   const [sessions, setSessions] = useState<InterviewSessionSummary[]>([]);
-  const [selectedId, setSelectedId] = useState('');
+  const [selectedId, setSelectedId] = useState(selectedSessionId || '');
   const [detail, setDetail] = useState<InterviewSessionDetail | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -1341,7 +1349,7 @@ function HistoryView({
     };
   }, [onLogout]);
 
-  const selectSession = async (sessionId: string) => {
+  const selectSession = useCallback(async (sessionId: string) => {
     if (manageMode) return;
     setSelectedId(sessionId);
     setLoadingDetail(true);
@@ -1359,7 +1367,12 @@ function HistoryView({
     } finally {
       setLoadingDetail(false);
     }
-  };
+  }, [manageMode, onLogout]);
+
+  useEffect(() => {
+    if (!selectedSessionId) return;
+    void Promise.resolve().then(() => selectSession(selectedSessionId));
+  }, [selectSession, selectedSessionId]);
 
   const deleteSelectedSession = async () => {
     if (!selectedId) return;
@@ -1373,6 +1386,7 @@ function HistoryView({
       setSessions((prev) => prev.filter((session) => session.id !== selectedId));
       setSelectedId('');
       setDetail(null);
+      onClearSelectedSession();
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
         onLogout();
@@ -1422,6 +1436,7 @@ function HistoryView({
       if (selectedId && deletedSet.has(selectedId)) {
         setSelectedId('');
         setDetail(null);
+        onClearSelectedSession();
       }
       setCheckedIds([]);
     } catch (err) {
@@ -1525,7 +1540,7 @@ function HistoryView({
                   <button
                     key={session.id}
                     className={`history-record ${session.id === selectedId ? 'active' : ''}`}
-                    onClick={() => void selectSession(session.id)}
+                    onClick={() => onSelectSession(session.id)}
                     aria-pressed={session.id === selectedId}
                   >
                     <span>{STATUS_LABELS[session.status] || session.status}</span>
@@ -3219,6 +3234,9 @@ function UserApp() {
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [historyNoticeDismissed, setHistoryNoticeDismissed] = useState(() => hasDismissedHistoryNotice());
   const [historyManageModeDefault, setHistoryManageModeDefault] = useState(false);
+  const [resourceLoadError, setResourceLoadError] = useState('');
+  const interviewRouteSessionId = getRouteSessionId(location.pathname, 'interview');
+  const historyRouteSessionId = getRouteSessionId(location.pathname, 'history');
 
   useEffect(() => {
     persistTheme(theme);
@@ -3253,9 +3271,12 @@ function UserApp() {
           setHistoryNoticeDismissed(hasDismissedHistoryNotice());
           const requestedView = routeToUserView(initialPath);
           const nextView = requestedView && requestedView !== 'login' ? requestedView : 'dashboard';
-          const nextRoute = userViewToRoute(nextView) ?? ROUTES.dashboard;
           setView(nextView);
-          if (initialPath !== nextRoute) {
+          const nextRoute = userViewToRoute(nextView) ?? ROUTES.dashboard;
+          const shouldKeepResourceRoute = Boolean(
+            getRouteSessionId(initialPath, 'interview') || getRouteSessionId(initialPath, 'history'),
+          );
+          if (!shouldKeepResourceRoute && initialPath !== nextRoute) {
             navigate(nextRoute, { replace: true });
           }
         } else {
@@ -3276,14 +3297,12 @@ function UserApp() {
   }, [navigate]);
 
   useEffect(() => {
-    const activeView = username && view !== 'chat'
-      ? routeToUserView(location.pathname) ?? view
-      : view;
-    if (!username || activeView === 'loading' || activeView === 'login') return;
+    const heartbeatView = username ? routeToUserView(location.pathname) ?? view : view;
+    if (!username || heartbeatView === 'loading' || heartbeatView === 'login') return;
 
     const sendHeartbeat = () => {
       if (document.visibilityState === 'hidden') return;
-      void sendPresenceHeartbeat(activeView, activeView === 'chat' ? sessionId : '').catch(() => undefined);
+      void sendPresenceHeartbeat(heartbeatView, heartbeatView === 'chat' ? sessionId : '').catch(() => undefined);
     };
 
     sendHeartbeat();
@@ -3304,7 +3323,7 @@ function UserApp() {
     navigateToView('dashboard', { replace: true });
   };
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     clearActiveBrowserSession();
     clearHistoryNoticeDismissed();
     await logout().catch(() => undefined);
@@ -3312,7 +3331,49 @@ function UserApp() {
     setHistoryNoticeDismissed(false);
     setHistoryManageModeDefault(false);
     navigateToView('login', { replace: true });
-  };
+  }, [navigateToView]);
+
+  useEffect(() => {
+    if (!username || !interviewRouteSessionId) return;
+    if (sessionId === interviewRouteSessionId && domain && difficulty) return;
+
+    let ignore = false;
+    void Promise.resolve()
+      .then(() => {
+        if (!ignore) setResourceLoadError('');
+        return fetchInterviewSessionDetail(interviewRouteSessionId);
+      })
+      .then(async (detail) => {
+        if (detail.session.status === 'completed') {
+          navigate(ROUTES.historyDetail(interviewRouteSessionId), { replace: true });
+          return null;
+        }
+        if (detail.session.status === 'paused') {
+          return resumeInterviewSession(interviewRouteSessionId);
+        }
+        return detail;
+      })
+      .then((detail) => {
+        if (ignore || !detail) return;
+        setSessionId(detail.session.id);
+        setDomain(detail.session.domain);
+        setDifficulty(detail.session.difficulty);
+        setChatMessages(toChatMessages(detail.messages));
+        setView('chat');
+      })
+      .catch((err) => {
+        if (ignore) return;
+        if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+          void handleLogout();
+        } else {
+          setResourceLoadError('面试会话加载失败，请从历史记录重新进入。');
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [difficulty, domain, handleLogout, interviewRouteSessionId, navigate, sessionId, username]);
 
   const handleStart = async (
     d: string,
@@ -3328,6 +3389,7 @@ function UserApp() {
       setDomain(d);
       setDifficulty(diff);
       setChatMessages(toChatMessages(created.messages));
+      navigate(ROUTES.interview(created.sessionId));
       setView('chat');
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
@@ -3370,6 +3432,7 @@ function UserApp() {
     setDomain(detail.session.domain);
     setDifficulty(detail.session.difficulty);
     setChatMessages(toChatMessages(detail.messages));
+    navigate(ROUTES.interview(detail.session.id));
     setView('chat');
   };
 
@@ -3385,6 +3448,15 @@ function UserApp() {
     navigateToView('history');
   };
 
+  const openHistoryDetail = (selectedSessionId: string) => {
+    setHistoryManageModeDefault(false);
+    navigate(ROUTES.historyDetail(selectedSessionId));
+  };
+
+  const clearHistoryDetail = () => {
+    navigate(ROUTES.history, { replace: true });
+  };
+
   const openHistoryManagement = () => {
     markHistoryNoticeDismissed();
     setHistoryNoticeDismissed(true);
@@ -3397,8 +3469,11 @@ function UserApp() {
     setHistoryNoticeDismissed(true);
   };
 
-  const routeView = username && view !== 'chat' ? routeToUserView(location.pathname) : null;
+  const routeView = username ? routeToUserView(location.pathname) : null;
   const activeView = routeView && routeView !== 'login' ? routeView : view;
+  const isLoadingInterviewRoute = activeView === 'chat'
+    && Boolean(interviewRouteSessionId)
+    && (sessionId !== interviewRouteSessionId || !domain || !difficulty);
   const showMobileNavigation = shouldShowMobileNavigation(activeView);
   const activeMobileNavigationItem = getActiveMobileNavigationItem(activeView);
 
@@ -3419,6 +3494,9 @@ function UserApp() {
       )}
       {activeView === 'loading' && <LoadingView />}
       {activeView === 'login' && <LoginView onLogin={handleLogin} />}
+      {resourceLoadError && activeView !== 'login' && (
+        <div className="login-error route-load-error" role="alert">{resourceLoadError}</div>
+      )}
       {activeView === 'dashboard' && (
         <DashboardView
           username={username}
@@ -3445,8 +3523,10 @@ function UserApp() {
           onProfile={() => navigateToView('profile')}
         />
       )}
-      {activeView === 'chat' && (
+      {activeView === 'chat' && isLoadingInterviewRoute && <LoadingView />}
+      {activeView === 'chat' && !isLoadingInterviewRoute && (
         <ChatView
+          key={sessionId}
           sessionId={sessionId}
           domain={domain}
           difficulty={difficulty}
@@ -3469,12 +3549,16 @@ function UserApp() {
       )}
       {activeView === 'history' && (
         <HistoryView
+          key={historyRouteSessionId || 'history'}
           username={username}
           theme={theme}
           onToggleTheme={toggleTheme}
           initialManageMode={historyManageModeDefault}
+          selectedSessionId={historyRouteSessionId || undefined}
           onHome={goHome}
           onStartInterview={() => navigateToView('setup')}
+          onSelectSession={openHistoryDetail}
+          onClearSelectedSession={clearHistoryDetail}
           onResumeInterview={handleResume}
           onLogout={handleLogout}
         />
@@ -3531,6 +3615,9 @@ function App() {
     <Routes>
       <Route path={ROUTES.root} element={<UserRouteFallback />} />
       {USER_TOP_LEVEL_ROUTE_ENTRIES.map((route) => (
+        <Route key={route.path} path={route.path} element={<UserApp />} />
+      ))}
+      {USER_RESOURCE_ROUTE_ENTRIES.map((route) => (
         <Route key={route.path} path={route.path} element={<UserApp />} />
       ))}
       {ADMIN_ROUTE_ENTRIES.map((route) => (

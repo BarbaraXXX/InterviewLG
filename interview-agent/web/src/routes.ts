@@ -32,6 +32,11 @@ export const USER_TOP_LEVEL_ROUTE_ENTRIES = [
   { path: ROUTES.insights, view: 'insights' },
 ] as const satisfies ReadonlyArray<{ path: string; view: MobileNavigationView }>;
 
+export const USER_RESOURCE_ROUTE_ENTRIES = [
+  { path: ROUTES.interview(':sessionId'), view: 'chat' },
+  { path: ROUTES.historyDetail(':sessionId'), view: 'history' },
+] as const satisfies ReadonlyArray<{ path: string; view: MobileNavigationView }>;
+
 export const ADMIN_ROUTE_ENTRIES = [
   { path: ROUTES.adminLogin },
   { path: ROUTES.admin },
@@ -52,9 +57,21 @@ export function userViewToRoute(view: MobileNavigationView): string | null {
 }
 
 export function routeToUserView(pathname: string): MobileNavigationView | null {
-  return USER_ROUTE_VIEWS.get(pathname) ?? null;
+  const topLevelView = USER_ROUTE_VIEWS.get(pathname);
+  if (topLevelView) return topLevelView;
+  if (getRouteSessionId(pathname, 'interview')) return 'chat';
+  if (getRouteSessionId(pathname, 'history')) return 'history';
+  return null;
 }
 
 export function isAdminRoute(pathname: string): boolean {
   return pathname === ROUTES.admin || pathname === ROUTES.adminLogin;
+}
+
+export function getRouteSessionId(pathname: string, resource: 'interview' | 'history'): string | null {
+  const prefix = `/${resource}/`;
+  if (!pathname.startsWith(prefix)) return null;
+  const sessionId = pathname.slice(prefix.length);
+  if (!sessionId || sessionId.includes('/')) return null;
+  return decodeURIComponent(sessionId);
 }
