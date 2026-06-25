@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { isAdminRoute, routeToUserView, ROUTES, userViewToRoute } from './routes.ts';
+import {
+  ADMIN_ROUTE_ENTRIES,
+  isAdminRoute,
+  routeToUserView,
+  ROUTES,
+  USER_TOP_LEVEL_ROUTE_ENTRIES,
+  userViewToRoute,
+} from './routes.ts';
 
 test('maps top-level user views to stable routes', () => {
   assert.equal(userViewToRoute('login'), ROUTES.login);
@@ -41,4 +48,23 @@ test('recognizes dedicated admin routes', () => {
   assert.equal(isAdminRoute('/dashboard'), false);
   assert.equal(isAdminRoute('/admin/users'), false);
   assert.equal(isAdminRoute('/login'), false);
+});
+
+test('exposes complete top-level route entries for route rendering', () => {
+  assert.deepEqual(
+    USER_TOP_LEVEL_ROUTE_ENTRIES.map((entry) => [entry.path, entry.view]),
+    [
+      [ROUTES.login, 'login'],
+      [ROUTES.dashboard, 'dashboard'],
+      [ROUTES.setup, 'setup'],
+      [ROUTES.profile, 'profile'],
+      [ROUTES.history, 'history'],
+      [ROUTES.insights, 'insights'],
+    ],
+  );
+
+  assert.deepEqual(
+    ADMIN_ROUTE_ENTRIES.map((entry) => entry.path),
+    [ROUTES.adminLogin, ROUTES.admin],
+  );
 });

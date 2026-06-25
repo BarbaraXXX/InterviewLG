@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useRef, useEffect, useCallback } from 'react';
 import { Activity, ArrowRight, BarChart3, ChevronDown, FileText, Play, RefreshCw, RotateCcw, ShieldCheck, Sparkles, Users } from 'lucide-react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import {
   adminLogin,
   adminLogout,
@@ -45,7 +45,6 @@ import {
   type Resume,
   type ResumeProject,
 } from './api';
-import { isAdminPath } from './adminRouting';
 import { CODING_LANGUAGE_LABELS } from './codingLanguages';
 import MarkdownMessage from './MarkdownMessage';
 import MobileBottomNav from './MobileBottomNav';
@@ -56,7 +55,13 @@ import {
   type MobileNavigationView,
 } from './mobileNavigation';
 import { RELEASE_NOTES } from './releaseNotes';
-import { routeToUserView, ROUTES, userViewToRoute } from './routes';
+import {
+  ADMIN_ROUTE_ENTRIES,
+  routeToUserView,
+  ROUTES,
+  USER_TOP_LEVEL_ROUTE_ENTRIES,
+  userViewToRoute,
+} from './routes';
 import { APP_VERSION } from './version';
 
 const CodingWorkspace = lazy(() => import('./CodingWorkspace'));
@@ -3517,12 +3522,23 @@ function UserApp() {
   );
 }
 
+function UserRouteFallback() {
+  return <Navigate to={hasActiveBrowserSession() ? ROUTES.dashboard : ROUTES.login} replace />;
+}
+
 function App() {
-  const location = useLocation();
-  if (isAdminPath(location.pathname)) {
-    return <AdminApp />;
-  }
-  return <UserApp />;
+  return (
+    <Routes>
+      <Route path={ROUTES.root} element={<UserRouteFallback />} />
+      {USER_TOP_LEVEL_ROUTE_ENTRIES.map((route) => (
+        <Route key={route.path} path={route.path} element={<UserApp />} />
+      ))}
+      {ADMIN_ROUTE_ENTRIES.map((route) => (
+        <Route key={route.path} path={route.path} element={<AdminApp />} />
+      ))}
+      <Route path="*" element={<UserRouteFallback />} />
+    </Routes>
+  );
 }
 
 export default App;
