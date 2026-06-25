@@ -64,6 +64,14 @@ export function routeToUserView(pathname: string): MobileNavigationView | null {
   return null;
 }
 
+export function resolveAuthenticatedUserView(
+  pathname: string,
+  fallbackView: MobileNavigationView,
+): MobileNavigationView {
+  const routeView = routeToUserView(pathname);
+  return routeView && routeView !== 'login' ? routeView : fallbackView;
+}
+
 export function isAdminRoute(pathname: string): boolean {
   return pathname === ROUTES.admin || pathname === ROUTES.adminLogin;
 }

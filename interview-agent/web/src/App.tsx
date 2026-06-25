@@ -58,6 +58,7 @@ import { RELEASE_NOTES } from './releaseNotes';
 import {
   ADMIN_ROUTE_ENTRIES,
   getRouteSessionId,
+  resolveAuthenticatedUserView,
   routeToUserView,
   ROUTES,
   USER_RESOURCE_ROUTE_ENTRIES,
@@ -3224,7 +3225,7 @@ function AdminApp() {
 function UserApp() {
   const location = useLocation();
   const navigate = useNavigate();
-  const initialPathRef = useRef(location.pathname);
+  const latestPathRef = useRef(location.pathname);
   const [view, setView] = useState<View>(() => (hasActiveBrowserSession() ? 'loading' : 'login'));
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [sessionId, setSessionId] = useState('');
@@ -3246,19 +3247,24 @@ function UserApp() {
     setTheme((current) => (current === 'dark' ? 'light' : 'dark'));
   };
 
+  useEffect(() => {
+    latestPathRef.current = location.pathname;
+  }, [location.pathname]);
+
   const navigateToView = useCallback((nextView: View, options?: { replace?: boolean }) => {
     const route = userViewToRoute(nextView);
     if (route && location.pathname !== route) {
+      latestPathRef.current = route;
       navigate(route, { replace: options?.replace });
     }
     setView(nextView);
   }, [location.pathname, navigate]);
 
   useEffect(() => {
-    const initialPath = initialPathRef.current;
+    const currentPath = latestPathRef.current;
     if (!hasActiveBrowserSession()) {
       void logout().catch(() => undefined);
-      if (initialPath !== ROUTES.login) {
+      if (currentPath !== ROUTES.login) {
         navigate(ROUTES.login, { replace: true });
       }
       return;
@@ -3269,20 +3275,21 @@ function UserApp() {
         if (me) {
           setUsername(me.username);
           setHistoryNoticeDismissed(hasDismissedHistoryNotice());
-          const requestedView = routeToUserView(initialPath);
+          const latestPath = latestPathRef.current;
+          const requestedView = routeToUserView(latestPath);
           const nextView = requestedView && requestedView !== 'login' ? requestedView : 'dashboard';
           setView(nextView);
           const nextRoute = userViewToRoute(nextView) ?? ROUTES.dashboard;
           const shouldKeepResourceRoute = Boolean(
-            getRouteSessionId(initialPath, 'interview') || getRouteSessionId(initialPath, 'history'),
+            getRouteSessionId(latestPath, 'interview') || getRouteSessionId(latestPath, 'history'),
           );
-          if (!shouldKeepResourceRoute && initialPath !== nextRoute) {
+          if (!shouldKeepResourceRoute && latestPath !== nextRoute) {
             navigate(nextRoute, { replace: true });
           }
         } else {
           clearActiveBrowserSession();
           setView('login');
-          if (initialPath !== ROUTES.login) {
+          if (latestPathRef.current !== ROUTES.login) {
             navigate(ROUTES.login, { replace: true });
           }
         }
@@ -3290,14 +3297,14 @@ function UserApp() {
       .catch(() => {
         clearActiveBrowserSession();
         setView('login');
-        if (initialPath !== ROUTES.login) {
+        if (latestPathRef.current !== ROUTES.login) {
           navigate(ROUTES.login, { replace: true });
         }
       });
   }, [navigate]);
 
   useEffect(() => {
-    const heartbeatView = username ? routeToUserView(location.pathname) ?? view : view;
+    const heartbeatView = username ? resolveAuthenticatedUserView(location.pathname, view) : view;
     if (!username || heartbeatView === 'loading' || heartbeatView === 'login') return;
 
     const sendHeartbeat = () => {
@@ -3389,6 +3396,7 @@ function UserApp() {
       setDomain(d);
       setDifficulty(diff);
       setChatMessages(toChatMessages(created.messages));
+      latestPathRef.current = ROUTES.interview(created.sessionId);
       navigate(ROUTES.interview(created.sessionId));
       setView('chat');
     } catch (err) {
@@ -3432,6 +3440,7 @@ function UserApp() {
     setDomain(detail.session.domain);
     setDifficulty(detail.session.difficulty);
     setChatMessages(toChatMessages(detail.messages));
+    latestPathRef.current = ROUTES.interview(detail.session.id);
     navigate(ROUTES.interview(detail.session.id));
     setView('chat');
   };
@@ -3450,10 +3459,13 @@ function UserApp() {
 
   const openHistoryDetail = (selectedSessionId: string) => {
     setHistoryManageModeDefault(false);
-    navigate(ROUTES.historyDetail(selectedSessionId));
+    const route = ROUTES.historyDetail(selectedSessionId);
+    latestPathRef.current = route;
+    navigate(route);
   };
 
   const clearHistoryDetail = () => {
+    latestPathRef.current = ROUTES.history;
     navigate(ROUTES.history, { replace: true });
   };
 
@@ -3470,7 +3482,7 @@ function UserApp() {
   };
 
   const routeView = username ? routeToUserView(location.pathname) : null;
-  const activeView = routeView && routeView !== 'login' ? routeView : view;
+  const activeView = username ? resolveAuthenticatedUserView(location.pathname, view) : view;
   const isLoadingInterviewRoute = activeView === 'chat'
     && Boolean(interviewRouteSessionId)
     && (sessionId !== interviewRouteSessionId || !domain || !difficulty);

@@ -5,6 +5,7 @@ import {
   ADMIN_ROUTE_ENTRIES,
   getRouteSessionId,
   isAdminRoute,
+  resolveAuthenticatedUserView,
   routeToUserView,
   ROUTES,
   USER_RESOURCE_ROUTE_ENTRIES,
@@ -34,6 +35,14 @@ test('maps stable routes back to user views', () => {
   assert.equal(routeToUserView('/profile'), 'profile');
   assert.equal(routeToUserView('/history'), 'history');
   assert.equal(routeToUserView('/insights'), 'insights');
+});
+
+test('resolves authenticated user view from the latest pathname before fallback state', () => {
+  assert.equal(resolveAuthenticatedUserView('/setup', 'dashboard'), 'setup');
+  assert.equal(resolveAuthenticatedUserView('/history', 'dashboard'), 'history');
+  assert.equal(resolveAuthenticatedUserView('/profile', 'dashboard'), 'profile');
+  assert.equal(resolveAuthenticatedUserView('/unknown', 'dashboard'), 'dashboard');
+  assert.equal(resolveAuthenticatedUserView('/login', 'dashboard'), 'dashboard');
 });
 
 test('maps resource routes to owning user views', () => {
