@@ -1,4 +1,5 @@
 const API_BASE = '/api';
+const interviewSessionListRequests = new Map<number, Promise<InterviewSessionSummary[]>>();
 
 export interface InterviewSessionSummary {
   id: string;
@@ -364,18 +365,29 @@ export async function createSession(
 }
 
 export async function fetchInterviewSessions(limit: number = 50): Promise<InterviewSessionSummary[]> {
-  const res = await fetch(`${API_BASE}/sessions?limit=${limit}`, {
+  const existingRequest = interviewSessionListRequests.get(limit);
+  if (existingRequest) return existingRequest;
+
+  const request = fetch(`${API_BASE}/sessions?limit=${limit}`, {
     headers: authHeaders(),
     credentials: 'same-origin',
-  });
-  if (res.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!res.ok) {
-    throw new Error('Failed to fetch interview sessions');
-  }
-  const data = await res.json();
-  return data.sessions || [];
+  })
+    .then(async (res) => {
+      if (res.status === 401) {
+        throw new Error('UNAUTHORIZED');
+      }
+      if (!res.ok) {
+        throw new Error('Failed to fetch interview sessions');
+      }
+      const data = await res.json();
+      return data.sessions || [];
+    })
+    .finally(() => {
+      interviewSessionListRequests.delete(limit);
+    });
+
+  interviewSessionListRequests.set(limit, request);
+  return request;
 }
 
 export async function fetchInterviewSessionDetail(sessionId: string): Promise<InterviewSessionDetail> {

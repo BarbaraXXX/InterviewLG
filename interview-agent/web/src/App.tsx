@@ -1306,49 +1306,44 @@ function HistoryView({
   const [error, setError] = useState('');
   const [manageMode, setManageMode] = useState(initialManageMode);
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
+  const historyMountedRef = useRef(false);
+  const loadingListRef = useRef(false);
 
   const loadSessions = useCallback(async () => {
+    if (loadingListRef.current) return;
+    loadingListRef.current = true;
     setLoadingList(true);
     setError('');
     try {
       const rows = await fetchInterviewSessions(100);
-      setSessions(rows);
+      if (historyMountedRef.current) {
+        setSessions(rows);
+      }
     } catch (err) {
+      if (!historyMountedRef.current) return;
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
         onLogout();
       } else {
         setError('历史记录加载失败，请稍后重试。');
       }
     } finally {
-      setLoadingList(false);
+      loadingListRef.current = false;
+      if (historyMountedRef.current) {
+        setLoadingList(false);
+      }
     }
   }, [onLogout]);
 
   useEffect(() => {
-    let ignore = false;
-    fetchInterviewSessions(100)
-      .then((rows) => {
-        if (!ignore) {
-          setSessions(rows);
-        }
-      })
-      .catch((err) => {
-        if (ignore) return;
-        if (err instanceof Error && err.message === 'UNAUTHORIZED') {
-          onLogout();
-        } else {
-          setError('历史记录加载失败，请稍后重试。');
-        }
-      })
-      .finally(() => {
-        if (!ignore) {
-          setLoadingList(false);
-        }
-      });
+    historyMountedRef.current = true;
+    const timeoutId = window.setTimeout(() => {
+      void loadSessions();
+    }, 0);
     return () => {
-      ignore = true;
+      window.clearTimeout(timeoutId);
+      historyMountedRef.current = false;
     };
-  }, [onLogout]);
+  }, [loadSessions]);
 
   const selectSession = useCallback(async (sessionId: string) => {
     if (manageMode) return;
