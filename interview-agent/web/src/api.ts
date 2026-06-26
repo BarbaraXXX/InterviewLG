@@ -1,5 +1,21 @@
 const API_BASE = '/api';
 const interviewSessionListRequests = new Map<number, Promise<InterviewSessionSummary[]>>();
+let authCheckRequest: Promise<{ username: string } | null> | null = null;
+let adminAuthCheckRequest: Promise<{ username: string } | null> | null = null;
+let domainsRequest: Promise<string[]> | null = null;
+let profilesRequest: Promise<ProfileSummary[]> | null = null;
+let resumesRequest: Promise<Resume[]> | null = null;
+let domainsCache: { value: string[]; expiresAt: number } | null = null;
+let profilesCache: { value: ProfileSummary[]; expiresAt: number } | null = null;
+let resumesCache: { value: Resume[]; expiresAt: number } | null = null;
+
+const DOMAIN_CACHE_TTL_MS = 5 * 60 * 1000;
+const SETUP_RESOURCE_CACHE_TTL_MS = 15 * 1000;
+
+function invalidateResumeCache(): void {
+  resumesCache = null;
+  resumesRequest = null;
+}
 
 export interface InterviewSessionSummary {
   id: string;
@@ -102,6 +118,13 @@ export interface SpeechTranscriptionResult {
   duration_ms: number | null;
 }
 
+export interface ProfileSummary {
+  key: string;
+  company: string;
+  position: string;
+  source_count: number;
+}
+
 export interface AdminOverview {
   online_users: number;
   recent_users: number;
@@ -158,12 +181,17 @@ export async function login(username: string, password: string): Promise<{ usern
 }
 
 export async function getMe(): Promise<{ username: string } | null> {
-  const res = await fetch(`${API_BASE}/auth/me`, {
+  if (authCheckRequest) return authCheckRequest;
+  authCheckRequest = fetch(`${API_BASE}/auth/me`, {
     credentials: 'same-origin',
+  }).then((res) => {
+    if (res.status === 401) return null;
+    if (!res.ok) throw new Error(`Auth check failed: ${res.status}`);
+    return res.json();
+  }).finally(() => {
+    authCheckRequest = null;
   });
-  if (res.status === 401) return null;
-  if (!res.ok) throw new Error(`Auth check failed: ${res.status}`);
-  return res.json();
+  return authCheckRequest;
 }
 
 export async function logout(): Promise<void> {
@@ -195,20 +223,28 @@ export async function adminLogout(): Promise<void> {
 }
 
 export async function getAdminMe(): Promise<{ username: string } | null> {
-  const res = await fetch(`${API_BASE}/admin/auth/me`, {
+  if (adminAuthCheckRequest) return adminAuthCheckRequest;
+  adminAuthCheckRequest = fetch(`${API_BASE}/admin/auth/me`, {
     credentials: 'same-origin',
+  }).then((res) => {
+    if (res.status === 401 || res.status === 403) return null;
+    if (!res.ok) throw new Error(`Admin auth check failed: ${res.status}`);
+    return res.json();
+  }).finally(() => {
+    adminAuthCheckRequest = null;
   });
-  if (!res.ok) return null;
-  return res.json();
+  return adminAuthCheckRequest;
 }
 
 export async function sendPresenceHeartbeat(currentView: string, activeSessionId: string = ''): Promise<void> {
-  await fetch(`${API_BASE}/presence/heartbeat`, {
+  const res = await fetch(`${API_BASE}/presence/heartbeat`, {
     method: 'POST',
     headers: authHeaders(),
     credentials: 'same-origin',
     body: JSON.stringify({ current_view: currentView, active_session_id: activeSessionId }),
   });
+  if (res.status === 401) throw new Error('UNAUTHORIZED');
+  if (!res.ok) throw new Error(`Presence heartbeat failed: ${res.status}`);
 }
 
 export async function fetchAdminOverview(): Promise<AdminOverview> {
@@ -241,34 +277,66 @@ export async function fetchAdminDailyUsage(days: number = 7): Promise<AdminDaily
 }
 
 export async function fetchDomains(): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/domains`);
-  const data = await res.json();
-  return data.presets;
+  if (domainsCache && domainsCache.expiresAt > Date.now()) return domainsCache.value;
+  if (domainsRequest) return domainsRequest;
+  domainsRequest = fetch(`${API_BASE}/domains`)
+    .then(async (res) => {
+      if (!res.ok) throw new Error(`Failed to fetch domains: ${res.status}`);
+      const data = await res.json();
+      const value = data.presets || [];
+      domainsCache = { value, expiresAt: Date.now() + DOMAIN_CACHE_TTL_MS };
+      return value;
+    })
+    .finally(() => {
+      domainsRequest = null;
+    });
+  return domainsRequest;
 }
 
-export async function fetchProfiles(): Promise<{key: string; company: string; position: string; source_count: number}[]> {
-  const res = await fetch(`${API_BASE}/profiles`, {
+export async function fetchProfiles(): Promise<ProfileSummary[]> {
+  if (profilesCache && profilesCache.expiresAt > Date.now()) return profilesCache.value;
+  if (profilesRequest) return profilesRequest;
+  profilesRequest = fetch(`${API_BASE}/profiles`, {
     headers: authHeaders(),
     credentials: 'same-origin',
-  });
-  if (!res.ok) return [];
-  const data = await res.json();
-  return data.profiles || [];
+  })
+    .then(async (res) => {
+      if (res.status === 401) throw new Error('UNAUTHORIZED');
+      if (!res.ok) throw new Error(`Failed to fetch profiles: ${res.status}`);
+      const data = await res.json();
+      const value = data.profiles || [];
+      profilesCache = { value, expiresAt: Date.now() + SETUP_RESOURCE_CACHE_TTL_MS };
+      return value;
+    })
+    .finally(() => {
+      profilesRequest = null;
+    });
+  return profilesRequest;
 }
 
 export async function fetchResumes(): Promise<Resume[]> {
-  const res = await fetch(`${API_BASE}/resumes`, {
+  if (resumesCache && resumesCache.expiresAt > Date.now()) return resumesCache.value;
+  if (resumesRequest) return resumesRequest;
+  resumesRequest = fetch(`${API_BASE}/resumes`, {
     headers: authHeaders(),
     credentials: 'same-origin',
-  });
-  if (res.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!res.ok) {
-    throw new Error('Failed to fetch resumes');
-  }
-  const data = await res.json();
-  return data.resumes || [];
+  })
+    .then(async (res) => {
+      if (res.status === 401) {
+        throw new Error('UNAUTHORIZED');
+      }
+      if (!res.ok) {
+        throw new Error(`Failed to fetch resumes: ${res.status}`);
+      }
+      const data = await res.json();
+      const value = data.resumes || [];
+      resumesCache = { value, expiresAt: Date.now() + SETUP_RESOURCE_CACHE_TTL_MS };
+      return value;
+    })
+    .finally(() => {
+      resumesRequest = null;
+    });
+  return resumesRequest;
 }
 
 export async function fetchLastInterviewConfig(): Promise<LastInterviewConfig | null> {
@@ -300,6 +368,7 @@ export async function createResume(title: string, projects: ResumeProject[], ski
   if (!res.ok) {
     throw new Error(data.detail || 'Failed to create resume');
   }
+  invalidateResumeCache();
   return data.resume;
 }
 
@@ -317,6 +386,7 @@ export async function updateResume(resumeId: number, title: string, projects: Re
   if (!res.ok) {
     throw new Error(data.detail || 'Failed to update resume');
   }
+  invalidateResumeCache();
   return data.resume;
 }
 
@@ -332,6 +402,7 @@ export async function deleteResume(resumeId: number): Promise<void> {
   if (!res.ok) {
     throw new Error('Failed to delete resume');
   }
+  invalidateResumeCache();
 }
 
 export async function createSession(
@@ -569,6 +640,7 @@ export function streamChat(
   onToken: (text: string) => void,
   onDone: () => void,
   contextMessage: string = '',
+  onError?: (err: Error) => void,
 ): AbortController {
   const controller = new AbortController();
   fetch(`${API_BASE}/chat/stream`, {
@@ -579,7 +651,11 @@ export function streamChat(
     signal: controller.signal,
   }).then(async (res) => {
     if (res.status === 401) {
-      onDone();
+      onError?.(new Error('UNAUTHORIZED'));
+      return;
+    }
+    if (!res.ok || !res.body) {
+      onError?.(new Error(`Chat stream failed: ${res.status}`));
       return;
     }
     const reader = res.body!.getReader();
@@ -599,6 +675,9 @@ export function streamChat(
         }
       }
     }
+  }).catch((err) => {
+    if (err instanceof Error && err.name === 'AbortError') return;
+    onError?.(err instanceof Error ? err : new Error('Chat stream failed'));
   });
   return controller;
 }

@@ -90,6 +90,8 @@ const SPEECH_SIGNAL_RMS_THRESHOLD = 0.018;
 const SPEECH_MIN_ACTIVE_MS = 250;
 const SPEECH_METER_UI_INTERVAL_MS = 100;
 const PRESENCE_HEARTBEAT_MS = 90000;
+const PRESENCE_HEARTBEAT_MIN_INTERVAL_MS = 60000;
+const AUTH_RETRY_DELAYS_MS = [2000, 5000, 10000, 30000];
 
 type BrowserWindowWithAudioContext = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
@@ -148,14 +150,6 @@ function formatSpeechRecordingTime(seconds: number): string {
   const minutes = Math.floor(safeSeconds / 60);
   const rest = safeSeconds % 60;
   return `${minutes}:${String(rest).padStart(2, '0')}`;
-}
-
-function hasActiveBrowserSession(): boolean {
-  try {
-    return sessionStorage.getItem(AUTH_SESSION_KEY) === '1';
-  } catch {
-    return false;
-  }
 }
 
 function markActiveBrowserSession(): void {
@@ -2179,6 +2173,7 @@ function ChatView({
   onToggleTheme,
   onPause,
   onEnd,
+  onAuthExpired,
 }: {
   sessionId: string;
   domain: string;
@@ -2188,6 +2183,7 @@ function ChatView({
   onToggleTheme: () => void;
   onPause: () => Promise<void>;
   onEnd: () => Promise<void>;
+  onAuthExpired: () => void;
 }) {
   const [messages, setMessages] = useState<Message[]>(() => initialMessages);
   const [input, setInput] = useState('');
@@ -2406,9 +2402,18 @@ function ChatView({
         scheduleAutoEnd(aiContent);
       },
       contextMessage,
+      (err) => {
+        setMessages((prev) => prev.filter((_, index) => index !== aiMsgIndex));
+        setIsStreaming(false);
+        if (err.message === 'UNAUTHORIZED') {
+          onAuthExpired();
+          return;
+        }
+        setAutoEndNotice('消息发送失败，请稍候重试。');
+      },
     );
     abortRef.current = controller;
-  }, [autoEnded, isStreaming, refreshCodingTask, refreshContextUsage, scheduleAutoEnd, sessionId]);
+  }, [autoEnded, isStreaming, onAuthExpired, refreshCodingTask, refreshContextUsage, scheduleAutoEnd, sessionId]);
 
   const startSpeechMeter = useCallback((stream: MediaStream) => {
     cleanupSpeechMeter();
@@ -2852,7 +2857,13 @@ function ChatView({
   );
 }
 
-function LoadingView() {
+function LoadingView({
+  message,
+  onRetry,
+}: {
+  message?: string;
+  onRetry?: () => void;
+}) {
   return (
     <div className="setup-view">
       <div className="loading-panel">
@@ -2865,7 +2876,14 @@ function LoadingView() {
         </div>
         <div>
           <h1>正在连接面试系统</h1>
-          <p>如果后端暂时不可用，将自动进入登录页。</p>
+          <p>{message || '正在校验登录状态，请稍候。'}</p>
+          {onRetry && (
+            <div className="loading-actions">
+              <button className="secondary-button" type="button" onClick={onRetry}>
+                重新校验
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -3163,6 +3181,8 @@ function AdminApp() {
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState('');
+  const [authRetryNonce, setAuthRetryNonce] = useState(0);
 
   useEffect(() => {
     persistTheme(theme);
@@ -3177,6 +3197,7 @@ function AdminApp() {
     void getAdminMe()
       .then((me) => {
         if (ignore) return;
+        setAuthError('');
         if (me) {
           setUsername(me.username);
           if (location.pathname === ROUTES.adminLogin) {
@@ -3189,13 +3210,16 @@ function AdminApp() {
           }
         }
       })
+      .catch(() => {
+        if (!ignore) setAuthError('管理员登录状态校验暂时失败，请稍候重试。');
+      })
       .finally(() => {
         if (!ignore) setLoading(false);
       });
     return () => {
       ignore = true;
     };
-  }, [location.pathname, navigate]);
+  }, [authRetryNonce, location.pathname, navigate]);
 
   const handleLogin = (adminUsername: string) => {
     setUsername(adminUsername);
@@ -3208,7 +3232,18 @@ function AdminApp() {
     navigate(ROUTES.adminLogin, { replace: true });
   }, [navigate]);
 
-  if (loading) return <LoadingView />;
+  if (loading || authError) {
+    return (
+      <LoadingView
+        message={authError || undefined}
+        onRetry={authError ? () => {
+          setAuthError('');
+          setLoading(true);
+          setAuthRetryNonce((current) => current + 1);
+        } : undefined}
+      />
+    );
+  }
   if (!username || location.pathname === ROUTES.adminLogin) {
     return <AdminLoginView theme={theme} onToggleTheme={toggleTheme} onLogin={handleLogin} />;
   }
@@ -3219,7 +3254,11 @@ function UserApp() {
   const location = useLocation();
   const navigate = useNavigate();
   const latestPathRef = useRef(location.pathname);
-  const [view, setView] = useState<View>(() => (hasActiveBrowserSession() ? 'loading' : 'login'));
+  const authRetryTimerRef = useRef<number | null>(null);
+  const authFailureCountRef = useRef(0);
+  const lastHeartbeatAtRef = useRef(0);
+  const logoutInFlightRef = useRef(false);
+  const [view, setView] = useState<View>('loading');
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
   const [sessionId, setSessionId] = useState('');
   const [domain, setDomain] = useState('');
@@ -3229,6 +3268,8 @@ function UserApp() {
   const [historyNoticeDismissed, setHistoryNoticeDismissed] = useState(() => hasDismissedHistoryNotice());
   const [historyManageModeDefault, setHistoryManageModeDefault] = useState(false);
   const [resourceLoadError, setResourceLoadError] = useState('');
+  const [authRetryNonce, setAuthRetryNonce] = useState(0);
+  const [authRetryMessage, setAuthRetryMessage] = useState('');
   const interviewRouteSessionId = getRouteSessionId(location.pathname, 'interview');
   const historyRouteSessionId = getRouteSessionId(location.pathname, 'history');
 
@@ -3253,22 +3294,44 @@ function UserApp() {
     setView(nextView);
   }, [location.pathname, navigate]);
 
-  useEffect(() => {
-    const currentPath = latestPathRef.current;
-    if (!hasActiveBrowserSession()) {
-      const timeoutId = window.setTimeout(() => {
-        setUsername('');
-        setView('login');
-        if (currentPath !== ROUTES.login) {
-          navigate(ROUTES.login, { replace: true });
-        }
-      }, 0);
-      return () => window.clearTimeout(timeoutId);
+  const retryAuthCheck = useCallback(() => {
+    if (authRetryTimerRef.current !== null) {
+      window.clearTimeout(authRetryTimerRef.current);
+      authRetryTimerRef.current = null;
     }
+    setAuthRetryMessage('');
+    setResourceLoadError('');
+    setView('loading');
+    setAuthRetryNonce((current) => current + 1);
+  }, []);
 
+  const handleAuthExpired = useCallback(() => {
+    if (authRetryTimerRef.current !== null) {
+      window.clearTimeout(authRetryTimerRef.current);
+      authRetryTimerRef.current = null;
+    }
+    clearActiveBrowserSession();
+    setUsername('');
+    setHistoryNoticeDismissed(false);
+    setHistoryManageModeDefault(false);
+    setAuthRetryMessage('');
+    setResourceLoadError('登录状态已过期，请重新登录。');
+    setView('login');
+    if (latestPathRef.current !== ROUTES.login) {
+      latestPathRef.current = ROUTES.login;
+      navigate(ROUTES.login, { replace: true });
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    let ignore = false;
     void getMe()
       .then((me) => {
+        if (ignore) return;
+        authFailureCountRef.current = 0;
+        setAuthRetryMessage('');
         if (me) {
+          markActiveBrowserSession();
           setResourceLoadError('');
           setUsername(me.username);
           setHistoryNoticeDismissed(hasDismissedHistoryNotice());
@@ -3285,31 +3348,66 @@ function UserApp() {
           }
         } else {
           clearActiveBrowserSession();
+          setUsername('');
+          setResourceLoadError('');
           setView('login');
           if (latestPathRef.current !== ROUTES.login) {
+            latestPathRef.current = ROUTES.login;
             navigate(ROUTES.login, { replace: true });
           }
         }
       })
       .catch(() => {
-        setResourceLoadError('登录状态校验暂时失败，请刷新页面重试。');
+        if (ignore) return;
+        const failureCount = authFailureCountRef.current;
+        const delay = AUTH_RETRY_DELAYS_MS[Math.min(failureCount, AUTH_RETRY_DELAYS_MS.length - 1)];
+        authFailureCountRef.current = failureCount + 1;
+        const retrySeconds = Math.ceil(delay / 1000);
+        const message = `登录状态校验暂时失败，系统将在 ${retrySeconds} 秒后自动重试。`;
+        setAuthRetryMessage(message);
+        setResourceLoadError(message);
+        setView('loading');
+        if (authRetryTimerRef.current !== null) {
+          window.clearTimeout(authRetryTimerRef.current);
+        }
+        authRetryTimerRef.current = window.setTimeout(() => {
+          authRetryTimerRef.current = null;
+          setAuthRetryNonce((current) => current + 1);
+        }, delay);
       });
-  }, [navigate]);
+
+    return () => {
+      ignore = true;
+    };
+  }, [authRetryNonce, navigate]);
+
+  useEffect(() => () => {
+    if (authRetryTimerRef.current !== null) {
+      window.clearTimeout(authRetryTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const heartbeatView = username ? resolveAuthenticatedUserView(location.pathname, view) : view;
     if (
       !username
       || location.pathname === ROUTES.login
-      || !hasActiveBrowserSession()
       || heartbeatView === 'loading'
       || heartbeatView === 'login'
     ) return;
 
     const sendHeartbeat = () => {
-      if (location.pathname === ROUTES.login || !hasActiveBrowserSession()) return;
+      if (location.pathname === ROUTES.login) return;
       if (document.visibilityState === 'hidden') return;
-      void sendPresenceHeartbeat(heartbeatView, heartbeatView === 'chat' ? sessionId : '').catch(() => undefined);
+      const now = Date.now();
+      if (now - lastHeartbeatAtRef.current < PRESENCE_HEARTBEAT_MIN_INTERVAL_MS) return;
+      lastHeartbeatAtRef.current = now;
+      void sendPresenceHeartbeat(heartbeatView, heartbeatView === 'chat' ? sessionId : '')
+        .catch((err) => {
+          if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+            handleAuthExpired();
+          }
+        });
     };
 
     sendHeartbeat();
@@ -3319,11 +3417,13 @@ function UserApp() {
       window.clearInterval(intervalId);
       document.removeEventListener('visibilitychange', sendHeartbeat);
     };
-  }, [location.pathname, sessionId, username, view]);
+  }, [handleAuthExpired, location.pathname, sessionId, username, view]);
 
   const handleLogin = (user: string) => {
     markActiveBrowserSession();
     clearHistoryNoticeDismissed();
+    setResourceLoadError('');
+    setAuthRetryMessage('');
     setUsername(user);
     setHistoryNoticeDismissed(false);
     setHistoryManageModeDefault(false);
@@ -3331,13 +3431,20 @@ function UserApp() {
   };
 
   const handleLogout = useCallback(async () => {
+    if (logoutInFlightRef.current) return;
+    logoutInFlightRef.current = true;
     clearActiveBrowserSession();
     clearHistoryNoticeDismissed();
-    await logout().catch(() => undefined);
-    setUsername('');
-    setHistoryNoticeDismissed(false);
-    setHistoryManageModeDefault(false);
-    navigateToView('login', { replace: true });
+    try {
+      await logout().catch(() => undefined);
+      setUsername('');
+      setHistoryNoticeDismissed(false);
+      setHistoryManageModeDefault(false);
+      setAuthRetryMessage('');
+      navigateToView('login', { replace: true });
+    } finally {
+      logoutInFlightRef.current = false;
+    }
   }, [navigateToView]);
 
   useEffect(() => {
@@ -3504,9 +3611,14 @@ function UserApp() {
       {username && view !== 'loading' && view !== 'chat' && routeView === 'login' && (
         <Navigate to={ROUTES.dashboard} replace />
       )}
-      {activeView === 'loading' && <LoadingView />}
+      {activeView === 'loading' && (
+        <LoadingView
+          message={authRetryMessage || undefined}
+          onRetry={authRetryMessage ? retryAuthCheck : undefined}
+        />
+      )}
       {activeView === 'login' && <LoginView onLogin={handleLogin} />}
-      {resourceLoadError && activeView !== 'login' && (
+      {resourceLoadError && activeView !== 'login' && activeView !== 'loading' && (
         <div className="login-error route-load-error" role="alert">{resourceLoadError}</div>
       )}
       {activeView === 'dashboard' && (
@@ -3547,6 +3659,7 @@ function UserApp() {
           onToggleTheme={toggleTheme}
           onPause={handlePause}
           onEnd={handleEnd}
+          onAuthExpired={handleAuthExpired}
         />
       )}
       {activeView === 'profile' && (

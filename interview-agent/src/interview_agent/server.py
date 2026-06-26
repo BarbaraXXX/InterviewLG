@@ -8,7 +8,7 @@ from pathlib import Path
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -1194,6 +1194,8 @@ if _STATIC_DIR.is_dir():
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
+        if full_path.startswith("api/"):
+            return JSONResponse(status_code=404, content={"detail": "API route not found"})
         file_path = (_STATIC_DIR / full_path).resolve()
         if not str(file_path).startswith(str(_STATIC_DIR.resolve())):
             raise HTTPException(status_code=404)

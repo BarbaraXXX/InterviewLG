@@ -22,12 +22,20 @@
 - 被动进入登录页时不再自动调用 `/api/auth/logout`，避免正常路由切换导致 logout 风暴。
 - 登录页和无有效浏览器会话时不发送 presence heartbeat。
 - Nginx 普通 `/api/` 限流从 `30r/m burst=10` 调整为 `120r/m burst=30`，登录/注册继续使用严格 auth 限流，`auth/me` 与 `auth/logout` 使用普通 API 限流；限流响应码改为更准确的 `429`。
+- 修复 `/api/auth/me` 遇到 429、502 或网络错误后，用户端永久停留在 loading 的问题；临时失败现在会自动退避重试，并提供手动重新校验入口。
+- 用户端启动时改为始终以 HTTP-only cookie 的 `/api/auth/me` 校验结果为准，`sessionStorage` 只作为辅助标记，不再阻止有效 cookie 用户进入系统。
+- `getMe()`、`getAdminMe()`、常用面试配置资源请求增加并发合并，降低 Dashboard、Setup 和历史页切换时的瞬时请求量。
+- heartbeat 改为检查响应状态，并加最小发送间隔；401 会进入统一登录失效流程，429/5xx 不再影响主界面。
+- Chat stream 遇到 401 时不再静默结束空回复，而是触发统一登录失效处理。
+- Nginx 增加轻量 `state` 限流桶，单独承载 `/api/auth/me`、`/api/auth/logout` 和 `/api/presence/heartbeat`，避免状态类请求污染普通 API 限流。
+- 后端 SPA fallback 对未匹配的 `/api/...` GET 请求返回 JSON 404，不再返回 `index.html`。
 
 影响：
 
 - 不改变数据库结构、用户数据、面试记录、Agent 流程和 Docker 服务数量。
 - 减少重复 SQLite 查询、认证检查和 Nginx 错误日志，对小服务器资源消耗更友好。
 - 真正异常高频请求仍会被限流。
+- 临时网络抖动或部署层限流不会再被误判为用户登出，用户可等待自动重试或手动重新校验。
 
 ## v1.10.0
 
