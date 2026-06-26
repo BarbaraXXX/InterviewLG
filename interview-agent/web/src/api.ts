@@ -161,7 +161,8 @@ export async function getMe(): Promise<{ username: string } | null> {
   const res = await fetch(`${API_BASE}/auth/me`, {
     credentials: 'same-origin',
   });
-  if (!res.ok) return null;
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`Auth check failed: ${res.status}`);
   return res.json();
 }
 

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { fetchInterviewSessions } from './api.ts';
+import { fetchInterviewSessions, getMe } from './api.ts';
 
 test('coalesces concurrent interview session list requests by limit', async () => {
   const originalFetch = globalThis.fetch;
@@ -33,6 +33,21 @@ test('coalesces concurrent interview session list requests by limit', async () =
     assert.equal(fetchCount, 1);
     assert.equal(firstResult[0].id, 'session-1');
     assert.deepEqual(secondResult, firstResult);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('does not treat rate-limited auth check as logged out', async () => {
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () => new Response('Too Many Requests', { status: 429 })) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => getMe(),
+      /Auth check failed/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

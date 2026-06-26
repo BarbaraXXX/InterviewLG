@@ -61,8 +61,6 @@ import {
   resolveAuthenticatedUserView,
   routeToUserView,
   ROUTES,
-  USER_RESOURCE_ROUTE_ENTRIES,
-  USER_TOP_LEVEL_ROUTE_ENTRIES,
   userViewToRoute,
 } from './routes';
 import { APP_VERSION } from './version';
@@ -3258,16 +3256,20 @@ function UserApp() {
   useEffect(() => {
     const currentPath = latestPathRef.current;
     if (!hasActiveBrowserSession()) {
-      void logout().catch(() => undefined);
-      if (currentPath !== ROUTES.login) {
-        navigate(ROUTES.login, { replace: true });
-      }
-      return;
+      const timeoutId = window.setTimeout(() => {
+        setUsername('');
+        setView('login');
+        if (currentPath !== ROUTES.login) {
+          navigate(ROUTES.login, { replace: true });
+        }
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
     }
 
     void getMe()
       .then((me) => {
         if (me) {
+          setResourceLoadError('');
           setUsername(me.username);
           setHistoryNoticeDismissed(hasDismissedHistoryNotice());
           const latestPath = latestPathRef.current;
@@ -3290,19 +3292,22 @@ function UserApp() {
         }
       })
       .catch(() => {
-        clearActiveBrowserSession();
-        setView('login');
-        if (latestPathRef.current !== ROUTES.login) {
-          navigate(ROUTES.login, { replace: true });
-        }
+        setResourceLoadError('登录状态校验暂时失败，请刷新页面重试。');
       });
   }, [navigate]);
 
   useEffect(() => {
     const heartbeatView = username ? resolveAuthenticatedUserView(location.pathname, view) : view;
-    if (!username || heartbeatView === 'loading' || heartbeatView === 'login') return;
+    if (
+      !username
+      || location.pathname === ROUTES.login
+      || !hasActiveBrowserSession()
+      || heartbeatView === 'loading'
+      || heartbeatView === 'login'
+    ) return;
 
     const sendHeartbeat = () => {
+      if (location.pathname === ROUTES.login || !hasActiveBrowserSession()) return;
       if (document.visibilityState === 'hidden') return;
       void sendPresenceHeartbeat(heartbeatView, heartbeatView === 'chat' ? sessionId : '').catch(() => undefined);
     };
@@ -3613,24 +3618,13 @@ function UserApp() {
   );
 }
 
-function UserRouteFallback() {
-  return <Navigate to={hasActiveBrowserSession() ? ROUTES.dashboard : ROUTES.login} replace />;
-}
-
 function App() {
   return (
     <Routes>
-      <Route path={ROUTES.root} element={<UserRouteFallback />} />
-      {USER_TOP_LEVEL_ROUTE_ENTRIES.map((route) => (
-        <Route key={route.path} path={route.path} element={<UserApp />} />
-      ))}
-      {USER_RESOURCE_ROUTE_ENTRIES.map((route) => (
-        <Route key={route.path} path={route.path} element={<UserApp />} />
-      ))}
       {ADMIN_ROUTE_ENTRIES.map((route) => (
         <Route key={route.path} path={route.path} element={<AdminApp />} />
       ))}
-      <Route path="*" element={<UserRouteFallback />} />
+      <Route path="*" element={<UserApp />} />
     </Routes>
   );
 }
