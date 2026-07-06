@@ -83,10 +83,33 @@ RAG_MIN_SCORE=0.0
 RAG_TIMEOUT_SECONDS=3
 RAG_MAX_CONTEXT_CHARS=1800
 
+# 出题原因调试（默认关闭；开启后仍需前端 URL 带 ?debug_rationale=1 才生效）
+QUESTION_RATIONALE_ENABLED=false
+
 # 认证（生产必须改）
 AUTH_SECRET_KEY=change-me-in-production
 AUTH_COOKIE_SECURE=false
 ```
+
+### 出题原因调试
+
+该功能用于开发者观察 Agent 为什么提出某个问题或追问，不展示模型内部思维链，也不会写入面试历史。
+
+开启方式需要两层控制同时满足：
+
+1. 后端 `.env` 设置：
+
+```bash
+QUESTION_RATIONALE_ENABLED=true
+```
+
+2. 前端访问 URL 带参数：
+
+```text
+/dashboard?debug_rationale=1
+```
+
+之后从工作台进入配置页、开始面试时，URL 参数会自动保留。聊天页左侧会显示 `Debug / 出题原因` 面板，展示本轮问题的阶段、主题、触发原因、考察目标和观察点。普通用户访问不带该参数时，不会绑定调试工具，也不会产生额外调试事件。
 
 ### QuestionCard RAG 联调
 

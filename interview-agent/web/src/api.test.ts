@@ -158,6 +158,61 @@ test('reports unauthorized chat stream through error callback', async () => {
   }
 });
 
+test('sends chat rationale debug flag and emits rationale events', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestBody: Record<string, unknown> = {};
+  const receivedRationales: Array<{ stage?: string; topic?: string }> = [];
+
+  globalThis.fetch = (async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body || '{}'));
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `data: ${JSON.stringify({
+            type: 'question_rationale',
+            content: {
+              stage: 'technical',
+              topic: 'LangGraph',
+              question_kind: 'followup',
+              objective: '验证状态流转理解',
+            },
+          })}\n\n`,
+        ));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+        controller.close();
+      },
+    });
+    return new Response(stream, {
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  }) as typeof fetch;
+
+  try {
+    streamChat(
+      'session-1',
+      'hello',
+      () => undefined,
+      () => undefined,
+      '',
+      () => undefined,
+      true,
+      (rationale) => {
+        receivedRationales.push(rationale);
+      },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(requestBody.debug_rationale, true);
+    assert.equal(receivedRationales[0]?.stage, 'technical');
+    assert.equal(receivedRationales[0]?.topic, 'LangGraph');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('coalesces common setup resource requests', async () => {
   const originalFetch = globalThis.fetch;
   const requestUrls: string[] = [];

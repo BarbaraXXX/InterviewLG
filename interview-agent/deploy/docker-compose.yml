@@ -25,8 +25,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: "1.0"
+          memory: 2G
+          cpus: "1.5"
 
   vectordb:
     build:
@@ -51,7 +51,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
           cpus: "0.5"
 
   nginx:

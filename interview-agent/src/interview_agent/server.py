@@ -21,6 +21,7 @@ from interview_agent.config import (
     auth_settings,
     context_settings,
     llm_settings,
+    question_rationale_settings,
     server_settings,
     speech_settings,
     vectordb_settings,
@@ -345,6 +346,7 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     context_message: str = ""
+    debug_rationale: bool = False
 
 
 class DeleteSessionsRequest(BaseModel):
@@ -648,6 +650,55 @@ def _build_code_submission_context(task: dict, language: str, code: str) -> str:
         "请口头指出不足并结束手撕部分，继续追问或进入总结，不要调用 request_coding_revision。"
     )
     return "\n\n".join(parts)
+
+
+_RATIONALE_FIELDS = (
+    "stage",
+    "topic",
+    "question_kind",
+    "trigger",
+    "objective",
+    "expected_signal",
+    "next_question_summary",
+)
+
+
+def _clean_rationale_event(raw_input: object) -> dict:
+    if not isinstance(raw_input, dict):
+        return {}
+    payload: dict[str, object] = {}
+    for key in _RATIONALE_FIELDS:
+        value = raw_input.get(key)
+        if key == "expected_signal":
+            if isinstance(value, list):
+                payload[key] = [str(item).strip()[:240] for item in value[:6] if str(item).strip()]
+            else:
+                payload[key] = []
+        else:
+            payload[key] = str(value or "").strip()[:240]
+    return payload
+
+
+def _extract_rationale_tool_input(event_data: object) -> object:
+    if not isinstance(event_data, dict):
+        return event_data
+    for key in ("input", "args", "tool_input"):
+        value = event_data.get(key)
+        if isinstance(value, dict):
+            return value
+    return event_data
+
+
+def _missing_rationale_debug_event() -> dict:
+    return {
+        "stage": "debug",
+        "topic": "未收到出题原因",
+        "question_kind": "diagnostic",
+        "trigger": "本轮 Agent 没有调用 emit_question_rationale，或工具参数无法解析。",
+        "objective": "提示调试链路已开启，但没有拿到有效出题原因。",
+        "expected_signal": ["检查后端 tool_start 日志", "确认模型是否调用 emit_question_rationale"],
+        "next_question_summary": "",
+    }
 
 
 def _parse_resume_projects(raw_projects: str) -> list[dict]:
@@ -1069,14 +1120,26 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
     user = await _get_current_user_row(username)
 
-    ses = await session_manager.get_or_rebuild_agent(req.session_id, username, user["id"])
+    rationale_debug_enabled = bool(question_rationale_settings.enabled and req.debug_rationale)
+    ses = await session_manager.get_or_rebuild_agent(
+        req.session_id,
+        username,
+        user["id"],
+        question_rationale_enabled=rationale_debug_enabled,
+    )
     if ses is None:
         raise HTTPException(status_code=404, detail="Session not found")
     session_row = await get_session_for_user(req.session_id, user["id"])
     if session_row is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    logger.info("chat_stream start user=%s session=%s msg_len=%d", username, req.session_id, len(req.message))
+    logger.info(
+        "chat_stream start user=%s session=%s msg_len=%d rationale_debug=%s",
+        username,
+        req.session_id,
+        len(req.message),
+        rationale_debug_enabled,
+    )
 
     async def load_current_user_memory_context(_session_id: str) -> str:
         return await load_user_memory_context(user["id"])
@@ -1116,6 +1179,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             session_row["difficulty"],
             session_row.get("structured_jd", ""),
             session_row.get("structured_profile", ""),
+            include_question_rationale=rationale_debug_enabled,
         ),
         messages=agent_input.messages,
         running_summary_context=agent_input.running_summary_context,
@@ -1148,6 +1212,7 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
     async def event_generator():
         full_content = ""
+        rationale_sent = False
         async for event in ses.agent.astream_events(
             {"agent_input": agent_input, "messages": agent_input.messages},
             version="v2",
@@ -1162,6 +1227,19 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                         yield f"data: {json.dumps({'type': 'token', 'content': text}, ensure_ascii=False)}\n\n"
             elif kind == "on_tool_start":
                 tool_name = event.get("name", "unknown")
+                if rationale_debug_enabled:
+                    logger.info(
+                        "question rationale debug tool_start session=%s tool=%s",
+                        req.session_id,
+                        tool_name,
+                    )
+                if tool_name == "emit_question_rationale" and rationale_debug_enabled:
+                    rationale = _clean_rationale_event(_extract_rationale_tool_input(event.get("data")))
+                    if rationale:
+                        rationale_sent = True
+                        yield (
+                            f"data: {json.dumps({'type': 'question_rationale', 'content': rationale}, ensure_ascii=False)}\n\n"
+                        )
                 yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name}, ensure_ascii=False)}\n\n"
             elif kind == "on_tool_end":
                 yield f"data: {json.dumps({'type': 'tool_end'}, ensure_ascii=False)}\n\n"
@@ -1169,6 +1247,11 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
         if full_content:
             await session_manager.append_message(req.session_id, "ai", full_content)
             asyncio.create_task(record_interview_state_safely(context_message or display_message, full_content))
+        if rationale_debug_enabled and not rationale_sent:
+            logger.info("question rationale missing session=%s", req.session_id)
+            yield (
+                f"data: {json.dumps({'type': 'question_rationale', 'content': _missing_rationale_debug_event()}, ensure_ascii=False)}\n\n"
+            )
         logger.info("chat_stream end user=%s session=%s reply_len=%d", username, req.session_id, len(full_content))
         yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 

@@ -12,6 +12,7 @@ from interview_agent.config import LLMProviderConfig, llm_settings
 from interview_agent.context import AgentInput
 from interview_agent.mcp_client import get_mcp_tools
 from interview_agent.prompts import build_system_prompt
+from interview_agent.rationale_tools import build_question_rationale_tools
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +86,24 @@ async def build_interview_agent(
     structured_profile: str = "",
     provider_name: str | None = None,
     session_id: str | None = None,
+    enable_question_rationale: bool = False,
 ) -> Runnable:
     provider = llm_settings.get_provider(provider_name)
     masked_key = (provider.api_key[:8] + "...") if len(provider.api_key) > 8 else provider.api_key
     logger.info("building agent provider=%s model=%s api_key=%s domain=%s difficulty=%s", provider_name or llm_settings.default_provider, provider.model, masked_key, domain, difficulty)
     tools = await get_mcp_tools()
+    if enable_question_rationale:
+        tools = [*tools, *build_question_rationale_tools()]
     if session_id:
         tools = [*tools, *build_coding_tools(session_id)]
     llm = _create_llm(tools, provider)
-    system_prompt = build_system_prompt(domain, difficulty, structured_jd, structured_profile)
+    system_prompt = build_system_prompt(
+        domain,
+        difficulty,
+        structured_jd,
+        structured_profile,
+        include_question_rationale=enable_question_rationale,
+    )
 
     graph = StateGraph(InterviewGraphState)
 

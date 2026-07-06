@@ -788,7 +788,7 @@ class FakeSessionManager:
         self.agent = agent
         self.appended = []
 
-    async def get_or_rebuild_agent(self, session_id, username, user_id):
+    async def get_or_rebuild_agent(self, session_id, username, user_id, question_rationale_enabled=False):
         return FakeSession(self.agent)
 
     async def append_message(self, session_id, role, content):

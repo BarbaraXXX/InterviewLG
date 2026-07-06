@@ -33,11 +33,19 @@ OPENING_MESSAGE = (
 class InterviewSession:
     """Thin wrapper: agent (in-memory) + metadata from DB."""
 
-    def __init__(self, agent: Runnable, domain: str, difficulty: str, username: str) -> None:
+    def __init__(
+        self,
+        agent: Runnable,
+        domain: str,
+        difficulty: str,
+        username: str,
+        question_rationale_enabled: bool = False,
+    ) -> None:
         self.agent = agent
         self.domain = domain
         self.difficulty = difficulty
         self.username = username
+        self.question_rationale_enabled = question_rationale_enabled
 
 
 class SessionManager:
@@ -58,12 +66,20 @@ class SessionManager:
         structured_jd: str = "",
         structured_profile: str = "",
         resume_title_snapshot: str = "",
+        question_rationale_enabled: bool = False,
     ) -> str:
         await expire_stale_sessions()
         self._evict_agents()
 
         session_id = uuid.uuid4().hex
-        agent = await build_interview_agent(domain, difficulty, structured_jd, structured_profile, session_id=session_id)
+        agent = await build_interview_agent(
+            domain,
+            difficulty,
+            structured_jd,
+            structured_profile,
+            session_id=session_id,
+            enable_question_rationale=question_rationale_enabled,
+        )
 
         await create_session(
             session_id=session_id,
@@ -77,7 +93,7 @@ class SessionManager:
         )
         await create_message(session_id, "ai", OPENING_MESSAGE, 0)
 
-        self._agents[session_id] = InterviewSession(agent, domain, difficulty, username)
+        self._agents[session_id] = InterviewSession(agent, domain, difficulty, username, question_rationale_enabled)
         trimmed_ids = await trim_user_sessions(user_id)
         for trimmed_id in trimmed_ids:
             self._agents.pop(trimmed_id, None)
@@ -99,9 +115,10 @@ class SessionManager:
         session_id: str,
         username: str,
         user_id: int,
+        question_rationale_enabled: bool = False,
     ) -> InterviewSession | None:
         ses = self.get_agent(session_id, username)
-        if ses is not None:
+        if ses is not None and ses.question_rationale_enabled == question_rationale_enabled:
             return ses
 
         row = await get_session_for_user(session_id, user_id)
@@ -114,8 +131,9 @@ class SessionManager:
             row["structured_jd"],
             row["structured_profile"],
             session_id=session_id,
+            enable_question_rationale=question_rationale_enabled,
         )
-        ses = InterviewSession(agent, row["domain"], row["difficulty"], username)
+        ses = InterviewSession(agent, row["domain"], row["difficulty"], username, question_rationale_enabled)
         self._agents[session_id] = ses
         self._evict_agents()
         logger.info("agent rebuilt from db session=%s user=%s", session_id, username)

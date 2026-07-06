@@ -193,6 +193,17 @@ class ContextSettings(BaseSettings):
         return min(max(value, 256), 32768)
 
 
+class QuestionRationaleSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="QUESTION_RATIONALE_",
+        env_file=str(_ENV_FILE),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    enabled: bool = False
+
+
 class SpeechSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="SPEECH_",
@@ -264,6 +275,7 @@ admin_auth_settings = AdminAuthSettings()
 vectordb_settings = VectorDBSettings()
 rag_settings = RAGSettings()
 context_settings = ContextSettings()
+question_rationale_settings = QuestionRationaleSettings()
 speech_settings = SpeechSettings()
 server_settings = ServerSettings()
 
@@ -298,6 +310,7 @@ def _log_loaded_settings() -> None:
             context_settings.recent_messages_keep_tokens,
             context_settings.running_summary_max_tokens,
         )
+        logger.info("question rationale debug enabled=%s", question_rationale_settings.enabled)
         logger.info(
             "speech settings provider=%s model=%s max_bytes=%d max_duration=%ds",
             speech_settings.provider,

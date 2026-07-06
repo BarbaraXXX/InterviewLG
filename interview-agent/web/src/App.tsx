@@ -42,6 +42,7 @@ import {
   type InterviewSessionDetail,
   type InterviewSessionSummary,
   type LastInterviewConfig,
+  type QuestionRationale,
   type Resume,
   type ResumeProject,
 } from './api';
@@ -75,6 +76,11 @@ interface Message {
   role: 'user' | 'ai';
   content: string;
   streaming?: boolean;
+}
+
+interface QuestionRationaleItem extends QuestionRationale {
+  id: number;
+  createdAt: string;
 }
 
 const AUTH_SESSION_KEY = 'interviewlg_active_session';
@@ -166,6 +172,10 @@ function clearActiveBrowserSession(): void {
   } catch {
     // Ignore storage failures and continue clearing server-side auth state.
   }
+}
+
+function hasQuestionRationaleDebug(search: string): boolean {
+  return new URLSearchParams(search).get('debug_rationale') === '1';
 }
 
 function hasDismissedHistoryNotice(): boolean {
@@ -2174,6 +2184,7 @@ function ChatView({
   onPause,
   onEnd,
   onAuthExpired,
+  debugRationaleEnabled,
 }: {
   sessionId: string;
   domain: string;
@@ -2184,8 +2195,10 @@ function ChatView({
   onPause: () => Promise<void>;
   onEnd: () => Promise<void>;
   onAuthExpired: () => void;
+  debugRationaleEnabled: boolean;
 }) {
   const [messages, setMessages] = useState<Message[]>(() => initialMessages);
+  const [questionRationales, setQuestionRationales] = useState<QuestionRationaleItem[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
@@ -2206,6 +2219,7 @@ function ChatView({
   const abortRef = useRef<AbortController | null>(null);
   const autoEndTimerRef = useRef<number | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+  const rationaleIdRef = useRef(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingStartedAtRef = useRef(0);
@@ -2411,9 +2425,29 @@ function ChatView({
         }
         setAutoEndNotice('消息发送失败，请稍候重试。');
       },
+      debugRationaleEnabled,
+      (rationale) => {
+        setQuestionRationales((prev) => [
+          {
+            ...rationale,
+            id: rationaleIdRef.current += 1,
+            createdAt: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+          },
+          ...prev,
+        ].slice(0, 20));
+      },
     );
     abortRef.current = controller;
-  }, [autoEnded, isStreaming, onAuthExpired, refreshCodingTask, refreshContextUsage, scheduleAutoEnd, sessionId]);
+  }, [
+    autoEnded,
+    debugRationaleEnabled,
+    isStreaming,
+    onAuthExpired,
+    refreshCodingTask,
+    refreshContextUsage,
+    scheduleAutoEnd,
+    sessionId,
+  ]);
 
   const startSpeechMeter = useCallback((stream: MediaStream) => {
     cleanupSpeechMeter();
@@ -2693,7 +2727,7 @@ function ChatView({
   const speechSignalClassName = speechError ? 'speech-signal-error' : hasSpeechSignal ? 'speech-signal-ok' : 'speech-signal-waiting';
 
   return (
-    <div className={`chat-view ${codingTask ? 'with-coding' : ''}`}>
+    <div className={`chat-view ${codingTask ? 'with-coding' : ''} ${debugRationaleEnabled ? 'with-rationale-debug' : ''}`}>
       <header className="chat-header">
         <div className="chat-header-info">
           <div className="chat-header-dot" />
@@ -2714,6 +2748,41 @@ function ChatView({
       </header>
 
       <div className="chat-body">
+        {debugRationaleEnabled && (
+          <aside className="rationale-debug-panel" aria-label="出题原因调试">
+            <div className="rationale-debug-head">
+              <span>Debug</span>
+              <strong>出题原因</strong>
+            </div>
+            {questionRationales.length === 0 ? (
+              <p className="rationale-debug-empty">
+                等待 Agent 发出下一次出题原因；如果一直为空，请确认后端已设置 QUESTION_RATIONALE_ENABLED=true。
+              </p>
+            ) : (
+              <div className="rationale-debug-list">
+                {questionRationales.map((item) => (
+                  <article className="rationale-debug-item" key={item.id}>
+                    <div className="rationale-debug-meta">
+                      <time>{item.createdAt}</time>
+                      <span>{item.stage || 'unknown'}</span>
+                      <span>{item.question_kind || 'question'}</span>
+                    </div>
+                    <h3>{item.topic || item.next_question_summary || '未命名问题'}</h3>
+                    {item.trigger && <p><strong>触发：</strong>{item.trigger}</p>}
+                    {item.objective && <p><strong>目标：</strong>{item.objective}</p>}
+                    {item.expected_signal.length > 0 && (
+                      <ul>
+                        {item.expected_signal.map((signal, index) => (
+                          <li key={`${item.id}-${index}`}>{signal}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </aside>
+        )}
         <section className="chat-panel" aria-label="面试对话">
           {autoEndNotice && <div className="chat-toast" role="status">{autoEndNotice}</div>}
           <div className="chat-messages">
@@ -3272,6 +3341,10 @@ function UserApp() {
   const [authRetryMessage, setAuthRetryMessage] = useState('');
   const interviewRouteSessionId = getRouteSessionId(location.pathname, 'interview');
   const historyRouteSessionId = getRouteSessionId(location.pathname, 'history');
+  const questionRationaleDebugEnabled = hasQuestionRationaleDebug(location.search);
+  const routeWithDebugFlag = useCallback((route: string) => (
+    questionRationaleDebugEnabled ? `${route}?debug_rationale=1` : route
+  ), [questionRationaleDebugEnabled]);
 
   useEffect(() => {
     persistTheme(theme);
@@ -3289,10 +3362,10 @@ function UserApp() {
     const route = userViewToRoute(nextView);
     if (route && location.pathname !== route) {
       latestPathRef.current = route;
-      navigate(route, { replace: options?.replace });
+      navigate(routeWithDebugFlag(route), { replace: options?.replace });
     }
     setView(nextView);
-  }, [location.pathname, navigate]);
+  }, [location.pathname, navigate, routeWithDebugFlag]);
 
   const retryAuthCheck = useCallback(() => {
     if (authRetryTimerRef.current !== null) {
@@ -3504,7 +3577,7 @@ function UserApp() {
       setDifficulty(diff);
       setChatMessages(toChatMessages(created.messages));
       latestPathRef.current = ROUTES.interview(created.sessionId);
-      navigate(ROUTES.interview(created.sessionId));
+      navigate(routeWithDebugFlag(ROUTES.interview(created.sessionId)));
       setView('chat');
     } catch (err) {
       if (err instanceof Error && err.message === 'UNAUTHORIZED') {
@@ -3548,7 +3621,7 @@ function UserApp() {
     setDifficulty(detail.session.difficulty);
     setChatMessages(toChatMessages(detail.messages));
     latestPathRef.current = ROUTES.interview(detail.session.id);
-    navigate(ROUTES.interview(detail.session.id));
+    navigate(routeWithDebugFlag(ROUTES.interview(detail.session.id)));
     setView('chat');
   };
 
@@ -3660,6 +3733,7 @@ function UserApp() {
           onPause={handlePause}
           onEnd={handleEnd}
           onAuthExpired={handleAuthExpired}
+          debugRationaleEnabled={questionRationaleDebugEnabled}
         />
       )}
       {activeView === 'profile' && (

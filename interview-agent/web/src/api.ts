@@ -118,6 +118,16 @@ export interface SpeechTranscriptionResult {
   duration_ms: number | null;
 }
 
+export interface QuestionRationale {
+  stage: string;
+  topic: string;
+  question_kind: string;
+  trigger: string;
+  objective: string;
+  expected_signal: string[];
+  next_question_summary: string;
+}
+
 export interface ProfileSummary {
   key: string;
   company: string;
@@ -641,13 +651,20 @@ export function streamChat(
   onDone: () => void,
   contextMessage: string = '',
   onError?: (err: Error) => void,
+  debugRationale: boolean = false,
+  onQuestionRationale?: (rationale: QuestionRationale) => void,
 ): AbortController {
   const controller = new AbortController();
   fetch(`${API_BASE}/chat/stream`, {
     method: 'POST',
     headers: authHeaders(),
     credentials: 'same-origin',
-    body: JSON.stringify({ session_id: sessionId, message, context_message: contextMessage }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      message,
+      context_message: contextMessage,
+      debug_rationale: debugRationale,
+    }),
     signal: controller.signal,
   }).then(async (res) => {
     if (res.status === 401) {
@@ -672,6 +689,7 @@ export function streamChat(
           const event = JSON.parse(line.slice(6));
           if (event.type === 'token') onToken(event.content);
           else if (event.type === 'done') onDone();
+          else if (event.type === 'question_rationale') onQuestionRationale?.(event.content);
         }
       }
     }

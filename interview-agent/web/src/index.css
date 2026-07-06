@@ -26,8 +26,9 @@
   --color-ai-bubble: rgba(15, 23, 42, 0.82);
   --color-config-section: rgba(17, 24, 39, 0.78);
 
-  --font-sans: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
-  --font-mono: 'SF Mono', 'Fira Code', ui-monospace, monospace;
+  --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
+  --font-mono: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, ui-monospace, monospace;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -2253,8 +2254,16 @@ body {
   grid-template-columns: minmax(0, 1fr);
 }
 
+.chat-view.with-rationale-debug .chat-body {
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
 .chat-view.with-coding .chat-body {
   grid-template-columns: minmax(360px, 0.9fr) minmax(460px, 1.1fr);
+}
+
+.chat-view.with-coding.with-rationale-debug .chat-body {
+  grid-template-columns: 300px minmax(320px, 0.85fr) minmax(460px, 1.15fr);
 }
 
 .chat-panel {
@@ -2267,6 +2276,113 @@ body {
 
 .chat-view.with-coding .chat-panel {
   border-right: 1px solid var(--color-border-subtle);
+}
+
+.rationale-debug-panel {
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-4);
+  background: var(--color-surface-muted);
+  border-right: 1px solid var(--color-border-subtle);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.rationale-debug-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.rationale-debug-head span {
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+.rationale-debug-head strong {
+  font-size: 0.875rem;
+  color: var(--color-text);
+}
+
+.rationale-debug-empty {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+
+.rationale-debug-list {
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-right: var(--space-1);
+}
+
+.rationale-debug-item {
+  padding: var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.rationale-debug-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-bottom: var(--space-2);
+  font-size: 0.6875rem;
+  color: var(--color-text-muted);
+}
+
+.rationale-debug-meta span,
+.rationale-debug-meta time {
+  padding: 2px 6px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 999px;
+}
+
+.rationale-debug-item h3 {
+  margin: 0 0 var(--space-2);
+  font-size: 0.9375rem;
+  line-height: 1.45;
+  color: var(--color-text);
+}
+
+.rationale-debug-item p {
+  margin: var(--space-1) 0;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.rationale-debug-item ul {
+  margin: var(--space-2) 0 0;
+  padding-left: 1rem;
+  color: var(--color-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+@media (max-width: 960px) {
+  .chat-view.with-rationale-debug .chat-body,
+  .chat-view.with-coding.with-rationale-debug .chat-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rationale-debug-panel {
+    max-height: 220px;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border-subtle);
+  }
 }
 
 .chat-header {
