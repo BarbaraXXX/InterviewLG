@@ -4,13 +4,7 @@ data/
 .DS_Store
 *.log
 docs/*
-!docs/
-!docs/git-version-history.md
-!docs/release-checklist.md
-!docs/code-style.md
-!docs/superpowers/
-!docs/superpowers/specs/
-!docs/superpowers/specs/*.md
+
 
 # Python
 __pycache__/
