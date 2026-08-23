@@ -2,7 +2,8 @@ import json
 
 from interview_agent import coding_tools as coding_tools_module
 from interview_agent.coding_tools import build_coding_tools
-from interview_agent.db import create_session, create_user, get_coding_task, init_db
+from interview_agent.db import advance_session_state, create_session, create_user, get_coding_task, init_db
+from interview_agent.interview_blueprint import build_interview_blueprint
 
 
 def _tool_by_name(name: str):
@@ -87,3 +88,63 @@ async def test_search_coding_problems_excludes_used_problem_ids(isolate_env, mon
     assert result["problems"][0]["id"] == "hot100_1"
     assert seen_exclude_ids == ["hot100_1"]
     assert result["excluded_problem_ids"] == ["hot100_1"]
+
+
+async def test_blueprint_blocks_coding_task_before_coding_stage(isolate_env, monkeypatch):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session(
+        "sid-code-tools",
+        user_id,
+        "alice",
+        "backend",
+        "campus_fulltime",
+        blueprint=build_interview_blueprint(question_tier="standard"),
+    )
+
+    async def fake_get_problem(problem_id: str) -> dict:
+        return {
+            "id": problem_id,
+            "title": "两数之和",
+            "statement": "给定数组和目标值，返回两个数下标。",
+            "starter_code": {"python": "class Solution:\n    pass\n"},
+        }
+
+    monkeypatch.setattr(coding_tools_module, "get_coding_problem", fake_get_problem)
+    tool = _tool_by_name("create_coding_task_from_problem")
+
+    blocked = json.loads(await tool.ainvoke({"problem_id": "hot100_1", "language": "python"}))
+    assert blocked["ok"] is False
+    assert "当前阶段" in blocked["error"]
+
+    for _ in range(8):
+        await advance_session_state("sid-code-tools", "campus_fulltime")
+    allowed = json.loads(await tool.ainvoke({"problem_id": "hot100_1", "language": "python"}))
+    assert allowed["ok"] is True
+
+
+async def test_compact_blueprint_never_allows_coding_task(isolate_env):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session(
+        "sid-code-tools",
+        user_id,
+        "alice",
+        "backend",
+        "campus_fulltime",
+        blueprint=build_interview_blueprint(question_tier="compact"),
+    )
+    tool = _tool_by_name("create_coding_task")
+
+    result = json.loads(
+        await tool.ainvoke(
+            {
+                "title": "两数之和",
+                "description": "给定数组和目标值，返回两个数下标。",
+                "language": "python",
+            }
+        )
+    )
+
+    assert result["ok"] is False
+    assert "不包含手撕代码" in result["error"]

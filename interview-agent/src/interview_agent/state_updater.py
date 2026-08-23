@@ -140,6 +140,7 @@ async def evaluate_turn_state(
     state: dict,
     user_message: str,
     agent_reply: str,
+    answered_stage: str | None = None,
     provider_name: str | None = None,
 ) -> dict:
     provider = llm_settings.get_provider(provider_name)
@@ -153,6 +154,7 @@ async def evaluate_turn_state(
         [
             "当前状态：",
             json.dumps(state, ensure_ascii=False),
+            f"候选人刚刚回答的问题所属阶段：{answered_stage or state.get('stage') or 'unknown'}",
             "候选人上一轮输入：",
             _clean_text(user_message),
             "面试官刚刚回复：",
@@ -164,7 +166,7 @@ async def evaluate_turn_state(
     return normalize_state_update(_load_json_object(content), state)
 
 
-async def apply_state_update(session_id: str, update: dict) -> dict | None:
+async def apply_state_update(session_id: str, update: dict, *, answered_stage: str | None = None) -> dict | None:
     state = await get_session_state(session_id)
     if state is None:
         return None
@@ -173,7 +175,7 @@ async def apply_state_update(session_id: str, update: dict) -> dict | None:
     if covered_topic := update.get("covered_topic"):
         item = {
             "topic": covered_topic.get("topic"),
-            "stage": covered_topic.get("stage") or state.get("stage"),
+            "stage": covered_topic.get("stage") or answered_stage or state.get("stage"),
             "status": covered_topic.get("status") or update.get("topic_status") or "completed",
             "quality": covered_topic.get("quality") or update.get("last_user_quality") or "unknown",
             "notes": covered_topic.get("notes") or update.get("pending_focus") or "",
@@ -186,9 +188,15 @@ async def apply_state_update(session_id: str, update: dict) -> dict | None:
     if topic_status in {"completed", "skipped"}:
         pending_focus = ""
 
+    # New schema-v1 sessions use the persisted Blueprint as the authoritative
+    # stage controller. The evaluator still records topic/quality evidence, but
+    # cannot move the interview to a different stage on its own. Legacy sessions
+    # without a Blueprint retain the previous evaluator-driven transition path.
+    evaluated_stage = None if state.get("blueprint_json") else update.get("stage")
+
     return await update_session_state_control(
         session_id,
-        stage=update.get("stage"),
+        stage=evaluated_stage,
         current_topic=current_topic,
         topic_status=topic_status,
         covered_topics=json.dumps(covered_topics, ensure_ascii=False),
@@ -202,6 +210,7 @@ async def record_turn_state(
     session_id: str,
     user_message: str,
     agent_reply: str,
+    answered_stage: str | None = None,
     provider_name: str | None = None,
 ) -> dict | None:
     state = await get_session_state(session_id)
@@ -211,9 +220,10 @@ async def record_turn_state(
         state=state,
         user_message=user_message,
         agent_reply=agent_reply,
+        answered_stage=answered_stage,
         provider_name=provider_name,
     )
-    updated = await apply_state_update(session_id, update)
+    updated = await apply_state_update(session_id, update, answered_stage=answered_stage)
     if updated:
         logger.info(
             "interview state updated session=%s stage=%s topic=%s status=%s quality=%s",

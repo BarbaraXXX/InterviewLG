@@ -14,6 +14,7 @@ from interview_agent.db import (
     create_message,
     create_user,
     get_session,
+    get_session_messages,
     init_db,
     request_latest_coding_task_revision,
     update_session_status,
@@ -24,7 +25,9 @@ from interview_agent.db import (
 from interview_agent.db import (
     create_session as db_create_session,
 )
+from interview_agent.interview_blueprint import build_interview_blueprint
 from interview_agent.jd_parser import StructuredJD
+from interview_agent.session import OPENING_MESSAGE, InterviewSession, SessionManager
 from interview_agent.speech import DisabledSpeechTranscriber, SpeechTranscriptionResult
 
 RESUME_PROJECTS = [{"name": "订单系统", "description": "负责缓存和接口设计"}]
@@ -255,6 +258,7 @@ def test_create_session_with_resume_snapshot(auth_client, monkeypatch):
             structured_jd="",
             structured_profile="",
             resume_title_snapshot="",
+            blueprint=None,
         ):
             await db_create_session(
                 "sid-resume",
@@ -265,6 +269,7 @@ def test_create_session_with_resume_snapshot(auth_client, monkeypatch):
                 structured_jd,
                 structured_profile,
                 resume_title_snapshot,
+                blueprint=blueprint,
             )
             return "sid-resume"
 
@@ -282,7 +287,14 @@ def test_create_session_with_resume_snapshot(auth_client, monkeypatch):
 
     resp = auth_client.post(
         "/api/sessions",
-        json={"domain": "backend", "difficulty": "campus_fulltime", "resume_id": resume["id"]},
+        json={
+            "domain": "backend",
+            "difficulty": "campus_fulltime",
+            "resume_id": resume["id"],
+            "question_tier": "standard",
+            "intensity": "pressure",
+            "focus_areas": ["project_depth", "communication"],
+        },
     )
 
     assert resp.status_code == 200
@@ -291,6 +303,11 @@ def test_create_session_with_resume_snapshot(auth_client, monkeypatch):
     assert "候选人简历上下文" in row["structured_profile"]
     assert "订单系统" in row["structured_profile"]
     assert "项目名称" in row["structured_profile"]
+    body = resp.json()
+    assert body["blueprint"]["question_budget"] == 10
+    assert body["blueprint"]["intensity"] == "pressure"
+    assert body["progress"]["stage"] == "opening"
+    assert body["progress"]["answered_questions"] == 0
 
 
 def test_last_interview_config_empty(auth_client):
@@ -323,6 +340,7 @@ def test_create_session_saves_last_interview_config(auth_client, monkeypatch):
             structured_jd="",
             structured_profile="",
             resume_title_snapshot="",
+            blueprint=None,
         ):
             self.count += 1
             session_id = f"sid-config-{self.count}"
@@ -335,6 +353,7 @@ def test_create_session_saves_last_interview_config(auth_client, monkeypatch):
                 structured_jd,
                 structured_profile,
                 resume_title_snapshot,
+                blueprint=blueprint,
             )
             return session_id
 
@@ -365,7 +384,13 @@ def test_create_session_saves_last_interview_config(auth_client, monkeypatch):
 
     second = auth_client.post(
         "/api/sessions",
-        json={"domain": "frontend", "difficulty": "campus_intern"},
+        json={
+            "domain": "frontend",
+            "difficulty": "campus_intern",
+            "question_tier": "deep",
+            "intensity": "guided",
+            "focus_areas": ["technical_foundation", "communication"],
+        },
     )
     assert second.status_code == 200
 
@@ -378,6 +403,35 @@ def test_create_session_saves_last_interview_config(auth_client, monkeypatch):
     assert config["job_description"] == ""
     assert config["profile_company"] == ""
     assert config["resume_id"] is None
+    assert config["question_tier"] == "deep"
+    assert config["intensity"] == "guided"
+    assert config["focus_areas"] == ["technical_foundation", "communication"]
+
+
+def test_create_session_rejects_more_than_two_focus_areas(auth_client):
+    import anyio
+
+    anyio.run(create_user, "tester", "hash")
+    response = auth_client.post(
+        "/api/sessions",
+        json={
+            "domain": "backend",
+            "difficulty": "campus_fulltime",
+            "focus_areas": ["project_depth", "technical_foundation", "communication"],
+        },
+    )
+    compact_coding = auth_client.post(
+        "/api/sessions",
+        json={
+            "domain": "backend",
+            "difficulty": "campus_fulltime",
+            "question_tier": "compact",
+            "focus_areas": ["coding"],
+        },
+    )
+
+    assert response.status_code == 422
+    assert compact_coding.status_code == 400
 
 
 def test_list_sessions_returns_current_user_summaries(auth_client):
@@ -410,7 +464,14 @@ def test_get_session_detail_returns_messages_for_owner(auth_client):
 
     async def seed():
       user_id = await create_user("tester", "hash")
-      await db_create_session("sid-1", user_id, "tester", "backend", "campus_fulltime")
+      await db_create_session(
+          "sid-1",
+          user_id,
+          "tester",
+          "backend",
+          "campus_fulltime",
+          blueprint=build_interview_blueprint(question_tier="compact"),
+      )
       await create_message("sid-1", "user", "我了解缓存", 0)
       await create_message("sid-1", "ai", "那 Redis 为什么快？", 1)
 
@@ -424,6 +485,46 @@ def test_get_session_detail_returns_messages_for_owner(auth_client):
     assert [m["role"] for m in body["messages"]] == ["user", "ai"]
     assert body["messages"][0]["content"] == "我了解缓存"
     assert body["coding_tasks"] == []
+    assert body["blueprint"]["question_tier"] == "compact"
+    assert body["progress"]["question_budget"] == 6
+
+
+def test_get_session_progress_returns_null_for_legacy_and_plan_for_blueprint(auth_client):
+    import anyio
+
+    async def seed():
+        user_id = await create_user("tester", "hash")
+        other_id = await create_user("other-progress", "hash")
+        await db_create_session("sid-legacy", user_id, "tester", "backend", "campus_fulltime")
+        await db_create_session(
+            "sid-plan",
+            user_id,
+            "tester",
+            "backend",
+            "campus_fulltime",
+            blueprint=build_interview_blueprint(question_tier="standard"),
+        )
+        await db_create_session(
+            "sid-other-plan",
+            other_id,
+            "other-progress",
+            "backend",
+            "campus_fulltime",
+            blueprint=build_interview_blueprint(question_tier="standard"),
+        )
+
+    anyio.run(seed)
+
+    legacy = auth_client.get("/api/sessions/sid-legacy/progress")
+    planned = auth_client.get("/api/sessions/sid-plan/progress")
+    forbidden = auth_client.get("/api/sessions/sid-other-plan/progress")
+
+    assert legacy.status_code == 200
+    assert legacy.json() == {"blueprint": None, "progress": None}
+    assert planned.status_code == 200
+    assert planned.json()["blueprint"]["question_tier"] == "standard"
+    assert planned.json()["progress"]["answered_questions"] == 0
+    assert forbidden.status_code == 404
 
 
 def test_get_session_context_usage(auth_client):
@@ -618,6 +719,22 @@ def test_pause_session_marks_paused(auth_client):
     assert row["ended_at"] is None
 
 
+def test_pause_session_rejects_when_turn_is_streaming(auth_client, monkeypatch):
+    import anyio
+
+    async def seed():
+      user_id = await create_user("tester", "hash")
+      await db_create_session("sid-busy", user_id, "tester", "backend", "campus_fulltime")
+
+    anyio.run(seed)
+    monkeypatch.setattr(server_module.session_turn_coordinator, "is_busy", lambda session_id: True)
+
+    response = auth_client.post("/api/sessions/sid-busy/pause")
+
+    assert response.status_code == 409
+    assert "turn is in progress" in response.json()["detail"]
+
+
 def test_resume_session_returns_messages(auth_client, monkeypatch):
     from unittest.mock import MagicMock
 
@@ -792,8 +909,15 @@ class FakeSessionManager:
     async def get_or_rebuild_agent(self, session_id, username, user_id, question_rationale_enabled=False):
         return FakeSession(self.agent)
 
-    async def append_message(self, session_id, role, content):
+    async def append_message(self, session_id, role, content, *, trim=True):
         self.appended.append((role, content))
+        return len(self.appended) - 1
+
+    async def trim_messages(self, session_id):
+        return None
+
+    async def end_session(self, session_id):
+        return None
 
     async def load_messages(self, session_id):
         return [HumanMessage(content="我了解 Redis zset")]
@@ -818,8 +942,12 @@ def test_chat_stream_rejects_overlapping_session_turn(auth_client, monkeypatch):
     async def fake_get_user(username):
         return {"id": 1, "username": username}
 
+    async def fake_get_session_for_user(session_id, user_id):
+        return {"id": session_id, "user_id": user_id, "status": "active"}
+
     monkeypatch.setattr(server_module, "session_turn_coordinator", BusyCoordinator())
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
+    monkeypatch.setattr(server_module, "get_session_for_user", fake_get_session_for_user)
 
     response = auth_client.post("/api/chat/stream", json={"session_id": "sid", "message": "并发回答"})
 
@@ -856,6 +984,22 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
     async def fake_advance(*args, **kwargs):
         return {}
 
+    async def fake_get_state(session_id):
+        return {
+            "target": "campus_fulltime",
+            "stage": "technical",
+            "stage_round": 1,
+            "total_round": 1,
+            "answered_questions": 1,
+            "current_topic": "Redis",
+            "topic_status": "probing",
+            "covered_topics": "[]",
+            "pending_focus": "",
+            "last_user_quality": "partial",
+            "stage_goal_status": "{}",
+            "blueprint_json": None,
+        }
+
     state_updates = []
 
     async def fake_record_turn_state(*args, **kwargs):
@@ -867,6 +1011,7 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
     monkeypatch.setattr(server_module, "get_session_for_user", fake_get_session_for_user)
     monkeypatch.setattr(server_module, "advance_session_state", fake_advance)
+    monkeypatch.setattr(server_module, "get_session_state", fake_get_state)
     monkeypatch.setattr(server_module, "record_turn_state", fake_record_turn_state)
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
 
@@ -911,6 +1056,22 @@ def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):
     async def fake_advance(*args, **kwargs):
         return {}
 
+    async def fake_get_state(session_id):
+        return {
+            "target": "campus_fulltime",
+            "stage": "coding",
+            "stage_round": 1,
+            "total_round": 1,
+            "answered_questions": 1,
+            "current_topic": "两数之和",
+            "topic_status": "probing",
+            "covered_topics": "[]",
+            "pending_focus": "",
+            "last_user_quality": "partial",
+            "stage_goal_status": "{}",
+            "blueprint_json": None,
+        }
+
     async def fake_record_turn_state(*args, **kwargs):
         return {}
 
@@ -918,6 +1079,7 @@ def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):
     monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
     monkeypatch.setattr(server_module, "get_session_for_user", fake_get_session_for_user)
     monkeypatch.setattr(server_module, "advance_session_state", fake_advance)
+    monkeypatch.setattr(server_module, "get_session_state", fake_get_state)
     monkeypatch.setattr(server_module, "record_turn_state", fake_record_turn_state)
     monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
 
@@ -930,6 +1092,118 @@ def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):
 
     assert resp.status_code == 200
     assert "好的" in body
-    assert isinstance(agent.last_messages[-1], HumanMessage)
-    assert agent.last_messages[-1].content == "完整代码上下文"
+    last_human = next(message for message in reversed(agent.last_messages) if isinstance(message, HumanMessage))
+    assert last_human.content == "完整代码上下文"
     assert fake_manager.appended[0] == ("user", "已提交代码题：两数之和")
+
+
+def test_chat_stream_failure_rolls_back_blueprint_turn(auth_client, monkeypatch):
+    import anyio
+
+    class FailingStreamAgent:
+        async def astream_events(self, payload, version):
+            yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessage(content="部分回复")}}
+            raise RuntimeError("model stream failed")
+
+    async def seed():
+        user_id = await create_user("tester", "hash")
+        await db_create_session(
+            "sid-failure",
+            user_id,
+            "tester",
+            "backend",
+            "campus_fulltime",
+            blueprint=build_interview_blueprint(question_tier="standard"),
+        )
+        await create_message("sid-failure", "ai", OPENING_MESSAGE, 0)
+
+    async def fake_search(query, domain):
+        return []
+
+    anyio.run(seed)
+    manager = SessionManager()
+    manager._agents["sid-failure"] = InterviewSession(
+        FailingStreamAgent(),
+        "backend",
+        "campus_fulltime",
+        "tester",
+    )
+    monkeypatch.setattr(server_module, "session_manager", manager)
+    monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
+
+    with pytest.raises(Exception, match="model stream failed"):
+        with auth_client.stream(
+            "POST",
+            "/api/chat/stream",
+            json={"session_id": "sid-failure", "message": "这轮回答会回滚"},
+        ) as response:
+            "".join(response.iter_text())
+
+    messages = anyio.run(get_session_messages, "sid-failure")
+    state = anyio.run(server_module.get_session_state, "sid-failure")
+    assert [message["content"] for message in messages] == [OPENING_MESSAGE]
+    assert state["total_round"] == 0
+    assert state["answered_questions"] == 0
+    assert server_module.session_turn_coordinator.is_busy("sid-failure") is False
+
+
+def test_summary_turn_completes_blueprint_session_on_server(auth_client, monkeypatch):
+    import anyio
+
+    class SummaryAgent:
+        async def astream_events(self, payload, version):
+            yield {
+                "event": "on_chat_model_stream",
+                "data": {"chunk": AIMessage(content="总体表现良好。本次面试到此结束")},
+            }
+
+    async def seed():
+        user_id = await create_user("tester", "hash")
+        await db_create_session(
+            "sid-summary",
+            user_id,
+            "tester",
+            "backend",
+            "campus_fulltime",
+            blueprint=build_interview_blueprint(question_tier="compact"),
+        )
+        await create_message("sid-summary", "ai", OPENING_MESSAGE, 0)
+        for _ in range(5):
+            await server_module.advance_session_state("sid-summary", "campus_fulltime")
+
+    async def fake_search(query, domain):
+        return []
+
+    async def fake_record_turn_state(**kwargs):
+        return await server_module.get_session_state(kwargs["session_id"])
+
+    async def fake_update_user_memory(user_id, session_id):
+        return None
+
+    anyio.run(seed)
+    manager = SessionManager()
+    manager._agents["sid-summary"] = InterviewSession(
+        SummaryAgent(),
+        "backend",
+        "campus_fulltime",
+        "tester",
+    )
+    monkeypatch.setattr(server_module, "session_manager", manager)
+    monkeypatch.setattr(server_module, "record_turn_state", fake_record_turn_state)
+    monkeypatch.setattr(server_module, "update_user_memory_safely", fake_update_user_memory)
+    monkeypatch.setattr(context_module, "search_interview_cards", fake_search)
+
+    with auth_client.stream(
+        "POST",
+        "/api/chat/stream",
+        json={"session_id": "sid-summary", "message": "最后一个技术问题的回答"},
+    ) as response:
+        body = "".join(response.iter_text())
+
+    session = anyio.run(get_session, "sid-summary")
+    state = anyio.run(server_module.get_session_state, "sid-summary")
+    assert response.status_code == 200
+    assert '"type": "done"' in body
+    assert session["status"] == "completed"
+    assert state["stage"] == "summary"
+    assert state["answered_questions"] == 6

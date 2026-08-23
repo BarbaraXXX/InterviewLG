@@ -2218,6 +2218,190 @@ body {
   margin-top: var(--space-4);
 }
 
+.strategy-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.setup-option-group {
+  margin-top: var(--space-5);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.setup-option-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.setup-option-heading h3 {
+  color: var(--color-text);
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.setup-option-heading > span {
+  flex-shrink: 0;
+  padding: 3px 8px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.strategy-option-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.strategy-card,
+.focus-card {
+  position: relative;
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  outline: none;
+  text-align: left;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.strategy-card {
+  min-height: 164px;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+.strategy-card > em {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 30px;
+  color: var(--color-text-tertiary);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.strategy-card > span:not(.strategy-card-state) {
+  font-size: 0.94rem;
+  font-weight: 750;
+}
+
+.strategy-card > strong {
+  color: var(--color-info);
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.strategy-card > small,
+.focus-card > small {
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
+.strategy-card-state {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  color: var(--color-text-tertiary);
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.strategy-card:hover:not(:disabled),
+.focus-card:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
+.strategy-card.active,
+.focus-card.active {
+  background: var(--color-accent-dim);
+  border-color: var(--color-accent-border);
+  box-shadow: inset 0 0 0 1px var(--color-accent-border);
+}
+
+.strategy-card.active > em {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  border-color: transparent;
+}
+
+.strategy-card.active .strategy-card-state,
+.focus-card.active > em {
+  color: var(--color-accent);
+}
+
+.strategy-card:focus-visible,
+.focus-card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.focus-option-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-2);
+}
+
+.focus-card {
+  min-height: 112px;
+  padding: var(--space-3);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-content: start;
+  gap: var(--space-2);
+}
+
+.focus-card > span {
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.focus-card > small {
+  grid-column: 1 / -1;
+}
+
+.focus-card > em {
+  align-self: start;
+  padding: 2px 6px;
+  color: var(--color-text-tertiary);
+  background: var(--color-surface);
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.focus-card:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.focus-option-hint {
+  margin-top: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.55;
+}
+
 .context-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
@@ -2402,6 +2586,60 @@ body {
   gap: var(--space-2);
   font-size: 0.8125rem;
   font-weight: 500;
+}
+
+.chat-header-main {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.interview-progress-meter {
+  width: clamp(210px, 23vw, 300px);
+  padding: 5px 8px;
+  background: var(--color-surface-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.interview-progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: 5px;
+  color: var(--color-text-secondary);
+  font-size: 0.7rem;
+  line-height: 1.2;
+}
+
+.interview-progress-copy span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.interview-progress-copy strong {
+  flex-shrink: 0;
+  color: var(--color-text);
+  font-size: 0.7rem;
+}
+
+.interview-progress-track {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  background: var(--color-border-subtle);
+  border-radius: 999px;
+}
+
+.interview-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: inherit;
+  transition: width var(--transition-fast);
 }
 
 .chat-header-actions {
@@ -3295,7 +3533,12 @@ body {
   }
 
   .console-grid {
-    grid-template-columns: 1fr;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .config-stage {
+    min-width: 0;
   }
 
   .dashboard-grid,
@@ -3315,6 +3558,26 @@ body {
     min-height: 55vh;
     border-right: 0;
     border-bottom: 1px solid var(--color-border-subtle);
+  }
+
+  .chat-header {
+    flex-wrap: wrap;
+  }
+
+  .chat-header-main {
+    width: 100%;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(240px, 0.9fr);
+  }
+
+  .chat-header-info {
+    min-width: 0;
+  }
+
+  .chat-header-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .coding-workspace {
@@ -3509,6 +3772,10 @@ body {
   .history-head-actions,
   .history-detail-actions {
     justify-content: flex-start;
+  }
+
+  .chat-header-main {
+    width: 100%;
   }
 
   .console-topbar {
@@ -3971,7 +4238,9 @@ body {
 
   .domain-grid,
   .difficulty-group,
-  .difficulty-grid {
+  .difficulty-grid,
+  .strategy-option-grid,
+  .focus-option-grid {
     grid-template-columns: 1fr;
   }
 
@@ -4179,6 +4448,17 @@ body {
     width: 100%;
     min-width: 0;
     overflow: hidden;
+  }
+
+  .chat-header-main {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2);
+  }
+
+  .interview-progress-meter {
+    width: 100%;
   }
 
   .chat-header-domain,

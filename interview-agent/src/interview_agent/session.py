@@ -67,6 +67,7 @@ class SessionManager:
         structured_profile: str = "",
         resume_title_snapshot: str = "",
         question_rationale_enabled: bool = False,
+        blueprint: dict | None = None,
     ) -> str:
         await expire_stale_sessions()
         self._evict_agents()
@@ -90,6 +91,7 @@ class SessionManager:
             structured_jd=structured_jd,
             structured_profile=structured_profile,
             resume_title_snapshot=resume_title_snapshot,
+            blueprint=blueprint,
         )
         await create_message(session_id, "ai", OPENING_MESSAGE, 0)
 
@@ -149,8 +151,13 @@ class SessionManager:
                 messages.append(AIMessage(content=r["content"]))
         return messages
 
-    async def append_message(self, session_id: str, role: str, content: str) -> None:
-        await append_message_with_next_seq(session_id, role, content)
+    async def append_message(self, session_id: str, role: str, content: str, *, trim: bool = True) -> int:
+        seq = await append_message_with_next_seq(session_id, role, content)
+        if trim:
+            await trim_session_messages(session_id, _MAX_MESSAGES_PER_SESSION)
+        return seq
+
+    async def trim_messages(self, session_id: str) -> None:
         await trim_session_messages(session_id, _MAX_MESSAGES_PER_SESSION)
 
     async def end_session(self, session_id: str) -> None:

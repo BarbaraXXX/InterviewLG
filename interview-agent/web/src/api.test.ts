@@ -2,15 +2,145 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  createSession,
+  endInterviewSession,
   fetchDomains,
+  fetchInterviewProgress,
   fetchInterviewSessions,
   fetchProfiles,
   fetchResumes,
   getAdminMe,
   getMe,
+  pauseInterviewSession,
   sendPresenceHeartbeat,
   streamChat,
 } from './api.ts';
+
+test('retries pause and end actions while a cancelled stream releases its turn lock', async () => {
+  const originalFetch = globalThis.fetch;
+  const attempts = new Map<string, number>();
+  globalThis.fetch = (async (input) => {
+    const url = String(input);
+    const count = (attempts.get(url) || 0) + 1;
+    attempts.set(url, count);
+    return new Response(count === 1 ? 'busy' : '{}', {
+      status: count === 1 ? 409 : 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    await pauseInterviewSession('session-1');
+    await endInterviewSession('session-1');
+    assert.equal(attempts.get('/api/sessions/session-1/pause'), 2);
+    assert.equal(attempts.get('/api/sessions/session-1/end'), 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('creates a session with the selected interview blueprint options', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = '';
+  let requestBody: Record<string, unknown> = {};
+  const blueprint = {
+    schema_version: 1,
+    question_tier: 'standard',
+    intensity: 'pressure',
+    focus_areas: ['project_depth', 'system_design'],
+    question_budget: 10,
+    include_coding: true,
+    stage_budgets: { opening: 1, project: 3, technical: 4, coding: 2 },
+  };
+  const progress = {
+    stage: 'opening',
+    stage_label: '开场',
+    answered_questions: 0,
+    question_budget: 10,
+    remaining_questions: 10,
+    percent: 0,
+    include_coding: true,
+  };
+
+  globalThis.fetch = (async (input, init) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body || '{}'));
+    return new Response(JSON.stringify({
+      session_id: 'session-1',
+      messages: [{ role: 'ai', content: '你好', seq: 1, created_at: '2026-08-23T00:00:00Z' }],
+      blueprint,
+      progress,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await createSession(
+      'backend',
+      'campus_fulltime',
+      'JD',
+      'A',
+      'B',
+      7,
+      'standard',
+      'pressure',
+      ['project_depth', 'system_design'],
+    );
+
+    assert.equal(requestUrl, '/api/sessions');
+    assert.equal(requestBody.question_tier, 'standard');
+    assert.equal(requestBody.intensity, 'pressure');
+    assert.deepEqual(requestBody.focus_areas, ['project_depth', 'system_design']);
+    assert.equal(result.sessionId, 'session-1');
+    assert.deepEqual(result.blueprint, blueprint);
+    assert.deepEqual(result.progress, progress);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetches the latest interview blueprint and progress', async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = '';
+  const response = {
+    blueprint: {
+      schema_version: 1,
+      question_tier: 'compact',
+      intensity: 'guided',
+      focus_areas: [],
+      question_budget: 6,
+      include_coding: false,
+      stage_budgets: { opening: 1, project: 2, technical: 3, coding: 0 },
+    },
+    progress: {
+      stage: 'technical',
+      stage_label: '技术基础',
+      answered_questions: 3,
+      question_budget: 6,
+      remaining_questions: 3,
+      percent: 50,
+      include_coding: false,
+    },
+  };
+
+  globalThis.fetch = (async (input) => {
+    requestUrl = String(input);
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await fetchInterviewProgress('session-1');
+    assert.equal(requestUrl, '/api/sessions/session-1/progress');
+    assert.deepEqual(result, response);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test('coalesces concurrent interview session list requests by limit', async () => {
   const originalFetch = globalThis.fetch;

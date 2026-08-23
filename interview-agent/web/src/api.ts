@@ -39,6 +39,42 @@ export interface InterviewSessionDetail {
   session: Omit<InterviewSessionSummary, 'message_count'>;
   messages: InterviewMessage[];
   coding_tasks: CodingTask[];
+  blueprint: InterviewBlueprint | null;
+  progress: InterviewProgress | null;
+}
+
+export type QuestionTier = 'compact' | 'standard' | 'deep';
+export type InterviewIntensity = 'guided' | 'standard' | 'pressure';
+
+export interface InterviewBlueprint {
+  schema_version: number;
+  question_tier: QuestionTier;
+  intensity: InterviewIntensity;
+  focus_areas: string[];
+  question_budget: number;
+  include_coding: boolean;
+  stage_budgets: {
+    opening: number;
+    project: number;
+    technical: number;
+    coding: number;
+  };
+}
+
+export interface InterviewProgress {
+  stage: string;
+  stage_label: string;
+  answered_questions: number;
+  question_budget: number;
+  remaining_questions: number;
+  percent: number;
+  include_coding: boolean;
+  is_complete?: boolean;
+}
+
+export interface InterviewPlanState {
+  blueprint: InterviewBlueprint | null;
+  progress: InterviewProgress | null;
 }
 
 export interface ContextUsageSection {
@@ -110,6 +146,9 @@ export interface LastInterviewConfig {
   profile_company: string;
   profile_position: string;
   resume_id: number | null;
+  question_tier?: QuestionTier;
+  intensity?: InterviewIntensity;
+  focus_areas?: string[];
   updated_at: string;
 }
 
@@ -422,7 +461,15 @@ export async function createSession(
   profileCompany: string = '',
   profilePosition: string = '',
   resumeId: number | null = null,
-): Promise<{ sessionId: string; messages: InterviewMessage[] }> {
+  questionTier: QuestionTier = 'standard',
+  intensity: InterviewIntensity = 'standard',
+  focusAreas: string[] = [],
+): Promise<{
+  sessionId: string;
+  messages: InterviewMessage[];
+  blueprint: InterviewBlueprint;
+  progress: InterviewProgress;
+}> {
   const res = await fetch(`${API_BASE}/sessions`, {
     method: 'POST',
     headers: authHeaders(),
@@ -434,15 +481,23 @@ export async function createSession(
       profile_company: profileCompany,
       profile_position: profilePosition,
       resume_id: resumeId,
+      question_tier: questionTier,
+      intensity,
+      focus_areas: focusAreas,
     }),
   });
   if (res.status === 401) {
     throw new Error('UNAUTHORIZED');
   }
   const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.detail || 'Failed to create interview session');
+  }
   return {
     sessionId: data.session_id,
     messages: data.messages || [],
+    blueprint: data.blueprint,
+    progress: data.progress,
   };
 }
 
@@ -482,6 +537,20 @@ export async function fetchInterviewSessionDetail(sessionId: string): Promise<In
   }
   if (!res.ok) {
     throw new Error('Failed to fetch interview session');
+  }
+  return res.json();
+}
+
+export async function fetchInterviewProgress(sessionId: string): Promise<InterviewPlanState> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/progress`, {
+    headers: authHeaders(),
+    credentials: 'same-origin',
+  });
+  if (res.status === 401) {
+    throw new Error('UNAUTHORIZED');
+  }
+  if (!res.ok) {
+    throw new Error('Failed to fetch interview progress');
   }
   return res.json();
 }
@@ -549,32 +618,38 @@ export async function saveCodingTaskDraft(taskId: string, language: string, code
   return data.task;
 }
 
-export async function endInterviewSession(sessionId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}/end`, {
-    method: 'POST',
-    headers: authHeaders(),
-    credentials: 'same-origin',
-  });
-  if (res.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!res.ok && res.status !== 404) {
-    throw new Error('Failed to end interview session');
+const SESSION_ACTION_RETRY_DELAYS_MS = [75, 200];
+
+async function postSessionAction(
+  path: string,
+  { allowNotFound = false }: { allowNotFound?: boolean } = {},
+): Promise<void> {
+  for (let attempt = 0; ; attempt += 1) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: authHeaders(),
+      credentials: 'same-origin',
+    });
+    if (res.status === 401) {
+      throw new Error('UNAUTHORIZED');
+    }
+    if (res.status === 409 && attempt < SESSION_ACTION_RETRY_DELAYS_MS.length) {
+      await new Promise((resolve) => globalThis.setTimeout(resolve, SESSION_ACTION_RETRY_DELAYS_MS[attempt]));
+      continue;
+    }
+    if (res.ok || (allowNotFound && res.status === 404)) {
+      return;
+    }
+    throw new Error(`Session action failed: ${res.status}`);
   }
 }
 
+export async function endInterviewSession(sessionId: string): Promise<void> {
+  await postSessionAction(`/sessions/${sessionId}/end`, { allowNotFound: true });
+}
+
 export async function pauseInterviewSession(sessionId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/sessions/${sessionId}/pause`, {
-    method: 'POST',
-    headers: authHeaders(),
-    credentials: 'same-origin',
-  });
-  if (res.status === 401) {
-    throw new Error('UNAUTHORIZED');
-  }
-  if (!res.ok) {
-    throw new Error('Failed to pause interview session');
-  }
+  await postSessionAction(`/sessions/${sessionId}/pause`);
 }
 
 export async function resumeInterviewSession(sessionId: string): Promise<InterviewSessionDetail> {
