@@ -10,6 +10,8 @@ from interview_agent.coding_problem_client import get_coding_problem
 from interview_agent.coding_problem_client import search_coding_problems as client_search_coding_problems
 from interview_agent.db import create_coding_task as db_create_coding_task
 from interview_agent.db import (
+    get_session_blueprint,
+    get_session_state,
     list_used_coding_problem_ids,
     request_latest_coding_task_revision,
     set_session_state_stage,
@@ -21,6 +23,18 @@ _MAX_DESCRIPTION_LEN = 5000
 _MAX_STARTER_CODE_LEN = 8000
 _MAX_ITEMS = 12
 _MAX_ITEM_LEN = 800
+
+
+async def _coding_mutation_error(session_id: str) -> str:
+    blueprint = await get_session_blueprint(session_id)
+    if blueprint is None:
+        return ""
+    if not blueprint["include_coding"]:
+        return "当前面试挡位不包含手撕代码，不能创建或重新打开代码题。"
+    state = await get_session_state(session_id)
+    if state is None or state.get("stage") != "coding":
+        return "当前阶段不允许创建或重新打开代码题，请等待流程控制进入手撕代码阶段。"
+    return ""
 
 
 def _clean_language(language: str) -> str:
@@ -130,6 +144,8 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
         fall back to create_coding_task.
         """
 
+        if permission_error := await _coding_mutation_error(session_id):
+            return json.dumps({"ok": False, "error": permission_error}, ensure_ascii=False)
         clean_problem_id = problem_id.strip()[:128]
         if not clean_problem_id:
             return json.dumps({"ok": False, "error": "problem_id is required"}, ensure_ascii=False)
@@ -199,6 +215,8 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
         the previous task is still active.
         """
 
+        if permission_error := await _coding_mutation_error(session_id):
+            return json.dumps({"ok": False, "error": permission_error}, ensure_ascii=False)
         clean_title = title.strip()[:_MAX_TITLE_LEN]
         clean_description = description.strip()[:_MAX_DESCRIPTION_LEN]
         if not clean_title or not clean_description:
@@ -251,6 +269,8 @@ def build_coding_tools(session_id: str) -> list[BaseTool]:
         调用后平台会重新打开同一道题，并把候选人上一版提交代码作为可编辑草稿。
         """
 
+        if permission_error := await _coding_mutation_error(session_id):
+            return json.dumps({"ok": False, "error": permission_error}, ensure_ascii=False)
         task = await request_latest_coding_task_revision(
             session_id,
             revision_instruction.strip()[:_MAX_ITEM_LEN],

@@ -16,6 +16,7 @@ import {
   fetchActiveCodingTask,
   fetchContextUsage,
   fetchDomains,
+  fetchInterviewProgress,
   fetchInterviewSessionDetail,
   fetchInterviewSessions,
   fetchLastInterviewConfig,
@@ -39,9 +40,12 @@ import {
   type CodingTask,
   type ContextUsage,
   type InterviewMessage,
+  type InterviewIntensity,
+  type InterviewProgress,
   type InterviewSessionDetail,
   type InterviewSessionSummary,
   type LastInterviewConfig,
+  type QuestionTier,
   type QuestionRationale,
   type Resume,
   type ResumeProject,
@@ -89,6 +93,7 @@ const THEME_STORAGE_KEY = 'interviewlg_theme';
 const SPEECH_DEVICE_STORAGE_KEY = 'interviewlg_speech_device_id';
 const HISTORY_WARNING_THRESHOLD = 45;
 const INTERVIEW_END_PHRASE = '本次面试到此结束';
+const INTERVIEW_COMPLETED_NOTICE = '本次面试已完成并保存，可点击“结束面试”返回工作台。';
 const AUTO_END_DELAY_MS = 10000;
 const AUTO_END_NOTICE_MS = 5000;
 const MAX_SPEECH_RECORDING_MS = 120000;
@@ -208,6 +213,82 @@ const DIFFICULTY_OPTIONS = [
   { value: 'campus_intern', label: '校招实习', meta: '实习岗位准备', description: '侧重基础知识、编码基本功、学习能力和表达清晰度。' },
   { value: 'campus_fulltime', label: '校招正式岗', meta: '应届正式岗位准备', description: '覆盖基础扎实度、项目理解、工程意识和独立解决问题能力。' },
 ];
+
+const QUESTION_TIER_OPTIONS: Array<{
+  value: QuestionTier;
+  label: string;
+  questionCount: number;
+  meta: string;
+  description: string;
+}> = [
+  {
+    value: 'compact',
+    label: '精简',
+    questionCount: 6,
+    meta: '不含手撕代码',
+    description: '适合快速热身，聚焦项目与核心技术问题。',
+  },
+  {
+    value: 'standard',
+    label: '标准',
+    questionCount: 10,
+    meta: '包含手撕代码',
+    description: '覆盖项目、技术与编码，适合日常完整练习。',
+  },
+  {
+    value: 'deep',
+    label: '深入',
+    questionCount: 15,
+    meta: '包含手撕代码',
+    description: '留出更多追问空间，用于完整检验知识和项目深度。',
+  },
+];
+
+const INTENSITY_OPTIONS: Array<{
+  value: InterviewIntensity;
+  label: string;
+  meta: string;
+  description: string;
+}> = [
+  {
+    value: 'guided',
+    label: '引导型',
+    meta: '适度提示',
+    description: '回答卡顿时给出线索，更适合学习与建立思路。',
+  },
+  {
+    value: 'standard',
+    label: '标准型',
+    meta: '平衡追问',
+    description: '按真实面试节奏追问，兼顾深度与沟通体验。',
+  },
+  {
+    value: 'pressure',
+    label: '压力型',
+    meta: '少提示、强追问',
+    description: '更少给出提示，重点检验独立思考与应对压力。',
+  },
+];
+
+const FOCUS_AREA_OPTIONS = [
+  { value: 'project_depth', label: '项目深挖', description: '架构取舍、个人贡献与问题复盘' },
+  { value: 'technical_foundation', label: '技术基础', description: '原理、边界条件与知识完整度' },
+  { value: 'system_design', label: '系统设计', description: '需求拆解、可扩展性与工程权衡' },
+  { value: 'coding', label: '编码能力', description: '解题思路、复杂度与边界处理' },
+  { value: 'communication', label: '表达思路', description: '结构化表达、澄清问题与沟通逻辑' },
+] as const;
+
+function normalizeQuestionTier(value?: string): QuestionTier {
+  return QUESTION_TIER_OPTIONS.some((option) => option.value === value)
+    ? value as QuestionTier
+    : 'standard';
+}
+
+function normalizeInterviewIntensity(value?: string): InterviewIntensity {
+  return INTENSITY_OPTIONS.some((option) => option.value === value)
+    ? value as InterviewIntensity
+    : 'standard';
+}
 
 const LEGACY_DIFFICULTY_LABELS: Record<string, string> = {
   junior: '校招实习',
@@ -1664,6 +1745,9 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
     profileCompany: string,
     profilePosition: string,
     resumeId: number | null,
+    questionTier: QuestionTier,
+    intensity: InterviewIntensity,
+    focusAreas: string[],
   ) => void;
   username: string;
   theme: ThemeMode;
@@ -1679,6 +1763,9 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
   const [selectedResumeId, setSelectedResumeId] = useState<number | null>(null);
   const [resumeLoadError, setResumeLoadError] = useState(false);
   const [difficulty, setDifficulty] = useState(DEFAULT_INTERVIEW_TARGET);
+  const [questionTier, setQuestionTier] = useState<QuestionTier>('standard');
+  const [intensity, setIntensity] = useState<InterviewIntensity>('standard');
+  const [focusAreas, setFocusAreas] = useState<string[]>([]);
   const [jobDescription, setJobDescription] = useState('');
   const [profiles, setProfiles] = useState<{key: string; company: string; position: string; source_count: number}[]>([]);
   const [selectedProfileIdx, setSelectedProfileIdx] = useState(-1);
@@ -1714,12 +1801,18 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
   const activeDomain = customDomain || selectedDomain;
   const activeDomainLabel = activeDomain ? (DOMAIN_LABELS[activeDomain] || activeDomain) : '待选择';
   const activeDifficulty = DIFFICULTY_OPTIONS.find((opt) => opt.value === difficulty) || DIFFICULTY_OPTIONS[1];
+  const activeQuestionTier = QUESTION_TIER_OPTIONS.find((option) => option.value === questionTier) || QUESTION_TIER_OPTIONS[1];
+  const activeIntensity = INTENSITY_OPTIONS.find((option) => option.value === intensity) || INTENSITY_OPTIONS[1];
+  const activeFocusLabels = focusAreas
+    .map((value) => FOCUS_AREA_OPTIONS.find((option) => option.value === value)?.label)
+    .filter(Boolean);
   const selectedResume = resumes.find((resume) => resume.id === selectedResumeId);
   const [mobileSetupStep, setMobileSetupStep] = useState(0);
   const setupSteps = [
     { key: 'domain', label: '技术方向', summary: activeDomainLabel },
     { key: 'resume', label: '简历选择', summary: selectedResume ? selectedResume.title : '可选' },
     { key: 'target', label: '目标岗位', summary: activeDifficulty.label },
+    { key: 'strategy', label: '面试策略', summary: `${activeQuestionTier.questionCount} 题 · ${activeIntensity.label}` },
     {
       key: 'context',
       label: '岗位信息',
@@ -1752,6 +1845,15 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
     }
 
     setDifficulty(normalizeInterviewTarget(config.difficulty || DEFAULT_INTERVIEW_TARGET));
+    const restoredQuestionTier = normalizeQuestionTier(config.question_tier);
+    setQuestionTier(restoredQuestionTier);
+    setIntensity(normalizeInterviewIntensity(config.intensity));
+    setFocusAreas(
+      (config.focus_areas || [])
+        .filter((value) => FOCUS_AREA_OPTIONS.some((option) => option.value === value))
+        .filter((value) => restoredQuestionTier !== 'compact' || value !== 'coding')
+        .slice(0, 2),
+    );
     setJobDescription(config.job_description || '');
 
     if (config.resume_id && availableResumes.some((resume) => resume.id === config.resume_id)) {
@@ -1831,7 +1933,17 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
       profileCompany = profiles[selectedProfileIdx].company;
       profilePosition = profiles[selectedProfileIdx].position;
     }
-    onStart(activeDomain, normalizeInterviewTarget(difficulty), jobDescription, profileCompany, profilePosition, selectedResumeId);
+    onStart(
+      activeDomain,
+      normalizeInterviewTarget(difficulty),
+      jobDescription,
+      profileCompany,
+      profilePosition,
+      selectedResumeId,
+      questionTier,
+      intensity,
+      focusAreas,
+    );
   };
 
   return (
@@ -1867,15 +1979,22 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
                   <small>{activeDifficulty.meta}</small>
                 </div>
               </li>
-              <li className={jobDescription.trim() ? 'complete' : ''}>
+              <li className="complete">
                 <span>04</span>
+                <div>
+                  <strong>面试策略</strong>
+                  <small>{activeQuestionTier.questionCount} 题 · {activeIntensity.label}</small>
+                </div>
+              </li>
+              <li className={jobDescription.trim() ? 'complete' : ''}>
+                <span>05</span>
                 <div>
                   <strong>岗位 JD</strong>
                   <small>{jobDescription.trim() ? '已提供岗位信息' : '可选，推荐提供'}</small>
                 </div>
               </li>
               <li className={selectedProfileIdx !== -1 ? 'complete' : ''}>
-                <span>05</span>
+                <span>06</span>
                 <div>
                   <strong>面试偏好</strong>
                   <small>{selectedProfileIdx === -1 ? '默认通用风格' : '已选择偏好'}</small>
@@ -1889,7 +2008,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               <div>
                 <p className="eyebrow">Interview Setup</p>
                 <h1 className="setup-title">定制你的技术面试场景</h1>
-                <p className="setup-subtitle">保留必要输入，减少多余选择。方向决定问题范围，目标岗位决定校招考察侧重，JD 会让问题更贴近真实招聘要求。</p>
+                <p className="setup-subtitle">方向和岗位决定考察范围，题量、强度与练习重点决定本次面试节奏。JD 会让问题更贴近真实招聘要求。</p>
               </div>
               <div className="config-status config-status-actions">
                 <div>
@@ -2024,6 +2143,104 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               </div>
             </section>
 
+            <section className={`config-section strategy-section mobile-config-step ${currentMobileSetupStep.key === 'strategy' ? 'active' : ''}`}>
+              <div className="section-heading">
+                <label className="section-label">面试策略</label>
+                <p>以问题数而非时长控制练习量；暂停或长时间思考不会消耗题量。</p>
+              </div>
+
+              <div className="setup-option-group" aria-labelledby="question-tier-label">
+                <div className="setup-option-heading">
+                  <h3 id="question-tier-label">问题挡位</h3>
+                  <span>必选</span>
+                </div>
+                <div className="strategy-option-grid">
+                  {QUESTION_TIER_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      className={`strategy-card ${questionTier === option.value ? 'active' : ''}`}
+                      type="button"
+                      onClick={() => {
+                        setQuestionTier(option.value);
+                        if (option.value === 'compact') {
+                          setFocusAreas((current) => current.filter((value) => value !== 'coding'));
+                        }
+                      }}
+                      aria-pressed={questionTier === option.value}
+                    >
+                      <em>{String(option.questionCount).padStart(2, '0')}</em>
+                      <span className="strategy-card-state" aria-hidden="true">
+                        {questionTier === option.value ? '已选择' : '点击选择'}
+                      </span>
+                      <span>{option.label}</span>
+                      <strong>{option.questionCount} 题 · {option.meta}</strong>
+                      <small>{option.description}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="setup-option-group" aria-labelledby="intensity-label">
+                <div className="setup-option-heading">
+                  <h3 id="intensity-label">面试强度</h3>
+                  <span>必选</span>
+                </div>
+                <div className="strategy-option-grid">
+                  {INTENSITY_OPTIONS.map((option, index) => (
+                    <button
+                      key={option.value}
+                      className={`strategy-card intensity-card ${intensity === option.value ? 'active' : ''}`}
+                      type="button"
+                      onClick={() => setIntensity(option.value)}
+                      aria-pressed={intensity === option.value}
+                    >
+                      <em>{String(index + 1).padStart(2, '0')}</em>
+                      <span className="strategy-card-state" aria-hidden="true">
+                        {intensity === option.value ? '已选择' : '点击选择'}
+                      </span>
+                      <span>{option.label}</span>
+                      <strong>{option.meta}</strong>
+                      <small>{option.description}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="setup-option-group" aria-labelledby="focus-area-label">
+                <div className="setup-option-heading">
+                  <h3 id="focus-area-label">本次重点（可选）</h3>
+                  <span id="focus-selection-count" role="status" aria-live="polite">已选 {focusAreas.length} / 2</span>
+                </div>
+                <div className="focus-option-grid">
+                  {FOCUS_AREA_OPTIONS.map((option) => {
+                    const selected = focusAreas.includes(option.value);
+                    const selectionLimitReached = focusAreas.length >= 2 && !selected;
+                    const unavailableWithoutCoding = questionTier === 'compact' && option.value === 'coding';
+                    return (
+                      <button
+                        key={option.value}
+                        className={`focus-card ${selected ? 'active' : ''}`}
+                        type="button"
+                        onClick={() => setFocusAreas((current) => (
+                          current.includes(option.value)
+                            ? current.filter((value) => value !== option.value)
+                            : [...current, option.value].slice(0, 2)
+                        ))}
+                        aria-pressed={selected}
+                        aria-describedby="focus-selection-count"
+                        disabled={selectionLimitReached || unavailableWithoutCoding}
+                      >
+                        <span>{option.label}</span>
+                        <small>{option.description}</small>
+                        <em>{unavailableWithoutCoding ? '精简档不含' : selected ? '已选' : '可选'}</em>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="focus-option-hint">不选时按岗位综合覆盖；选择后会在总题量内增加对应方向的追问。</p>
+              </div>
+            </section>
+
             <div className={`context-grid mobile-config-step ${currentMobileSetupStep.key === 'context' ? 'active' : ''}`}>
               <section className="context-panel">
                 <div className="section-heading">
@@ -2121,6 +2338,18 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
                 <strong>{activeDifficulty.label}</strong>
               </div>
               <div>
+                <span>问题挡位</span>
+                <strong>{activeQuestionTier.label} · {activeQuestionTier.questionCount} 题 · {activeQuestionTier.meta}</strong>
+              </div>
+              <div>
+                <span>面试强度</span>
+                <strong>{activeIntensity.label} · {activeIntensity.meta}</strong>
+              </div>
+              <div>
+                <span>本次重点</span>
+                <strong>{activeFocusLabels.length > 0 ? activeFocusLabels.join(' / ') : '综合覆盖'}</strong>
+              </div>
+              <div>
                 <span>简历</span>
                 <strong>{selectedResume ? selectedResume.title : '未使用简历'}</strong>
               </div>
@@ -2134,6 +2363,7 @@ function SetupView({ onStart, username, theme, onToggleTheme, onLogout, onBack, 
               <ul className="setup-guide">
                 <li>方向不确定时，优先选择最接近投递岗位主职责的方向。</li>
                 <li>准备实习投递选择校招实习，准备应届正式岗位选择校招正式岗。</li>
+                <li>首次使用建议保持“标准 10 题 + 标准型”，便于获得完整体验。</li>
                 <li>有明确招聘链接时建议粘贴 JD，问题会更聚焦。</li>
               </ul>
             </div>
@@ -2174,11 +2404,44 @@ function ContextUsageMeter({ usage }: { usage: ContextUsage }) {
   );
 }
 
+function isInterviewProgressComplete(progress: InterviewProgress | null): boolean {
+  return Boolean(progress && (progress.is_complete || progress.stage === 'summary'));
+}
+
+function InterviewProgressMeter({ progress }: { progress: InterviewProgress }) {
+  const questionBudget = Math.max(1, progress.question_budget || 1);
+  const answeredQuestions = Math.max(0, Math.min(questionBudget, progress.answered_questions || 0));
+  const percent = Math.max(0, Math.min(100, progress.percent || 0));
+  const stageLabel = progress.stage_label || '面试进行中';
+
+  return (
+    <div
+      className="interview-progress-meter"
+      role="progressbar"
+      aria-label="面试进度"
+      aria-valuemin={0}
+      aria-valuemax={questionBudget}
+      aria-valuenow={answeredQuestions}
+      aria-valuetext={`${stageLabel}，已完成 ${answeredQuestions} / ${questionBudget} 题`}
+      title={`当前阶段：${stageLabel}\n已完成 ${answeredQuestions} / ${questionBudget} 题\n剩余 ${Math.max(0, progress.remaining_questions || 0)} 题`}
+    >
+      <div className="interview-progress-copy">
+        <span>{stageLabel}</span>
+        <strong>{answeredQuestions} / {questionBudget} 题</strong>
+      </div>
+      <div className="interview-progress-track" aria-hidden="true">
+        <div className="interview-progress-fill" style={{ width: `${percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function ChatView({
   sessionId,
   domain,
   difficulty,
   initialMessages,
+  initialProgress,
   theme,
   onToggleTheme,
   onPause,
@@ -2190,6 +2453,7 @@ function ChatView({
   domain: string;
   difficulty: string;
   initialMessages: Message[];
+  initialProgress: InterviewProgress | null;
   theme: ThemeMode;
   onToggleTheme: () => void;
   onPause: () => Promise<void>;
@@ -2204,8 +2468,11 @@ function ChatView({
   const [isComposing, setIsComposing] = useState(false);
   const [codingTask, setCodingTask] = useState<CodingTask | null>(null);
   const [contextUsage, setContextUsage] = useState<ContextUsage | null>(null);
-  const [autoEndNotice, setAutoEndNotice] = useState('');
-  const [autoEnded, setAutoEnded] = useState(false);
+  const [interviewProgress, setInterviewProgress] = useState<InterviewProgress | null>(() => initialProgress);
+  const [autoEndNotice, setAutoEndNotice] = useState(() => (
+    isInterviewProgressComplete(initialProgress) ? INTERVIEW_COMPLETED_NOTICE : ''
+  ));
+  const [autoEnded, setAutoEnded] = useState(() => isInterviewProgressComplete(initialProgress));
   const [speechState, setSpeechState] = useState<SpeechInputState>('idle');
   const [speechError, setSpeechError] = useState('');
   const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -2247,6 +2514,47 @@ function ChatView({
       setContextUsage(null);
     }
   }, [sessionId]);
+
+  const refreshInterviewProgress = useCallback(async () => {
+    try {
+      const state = await fetchInterviewProgress(sessionId);
+      setInterviewProgress(state.progress);
+      if (isInterviewProgressComplete(state.progress)) {
+        setAutoEnded(true);
+        setAutoEndNotice(INTERVIEW_COMPLETED_NOTICE);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === 'UNAUTHORIZED') {
+        onAuthExpired();
+      }
+      // Keep the latest known progress visible when a background refresh fails.
+    }
+  }, [onAuthExpired, sessionId]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadInterviewProgress() {
+      try {
+        const state = await fetchInterviewProgress(sessionId);
+        if (!isActive) return;
+        setInterviewProgress(state.progress);
+        if (isInterviewProgressComplete(state.progress)) {
+          setAutoEnded(true);
+          setAutoEndNotice(INTERVIEW_COMPLETED_NOTICE);
+        }
+      } catch (err) {
+        if (isActive && err instanceof Error && err.message === 'UNAUTHORIZED') {
+          onAuthExpired();
+        }
+      }
+    }
+
+    void loadInterviewProgress();
+    return () => {
+      isActive = false;
+    };
+  }, [onAuthExpired, sessionId]);
 
   useEffect(() => {
     let isActive = true;
@@ -2351,6 +2659,7 @@ function ChatView({
   }, []);
 
   const scheduleAutoEnd = useCallback((reply: string) => {
+    if (interviewProgress && !isInterviewProgressComplete(interviewProgress)) return;
     if (!reply.includes(INTERVIEW_END_PHRASE) || autoEnded || autoEndTimerRef.current !== null) return;
     autoEndTimerRef.current = window.setTimeout(() => {
       autoEndTimerRef.current = null;
@@ -2364,7 +2673,7 @@ function ChatView({
           showAutoEndNotice('自动结束保存失败，请手动点击“结束面试”。');
         });
     }, AUTO_END_DELAY_MS);
-  }, [autoEnded, refreshContextUsage, sessionId, showAutoEndNotice]);
+  }, [autoEnded, interviewProgress, refreshContextUsage, sessionId, showAutoEndNotice]);
 
   useEffect(() => {
     let ignore = false;
@@ -2413,6 +2722,7 @@ function ChatView({
         setIsStreaming(false);
         void refreshCodingTask();
         void refreshContextUsage();
+        void refreshInterviewProgress();
         scheduleAutoEnd(aiContent);
       },
       contextMessage,
@@ -2445,6 +2755,7 @@ function ChatView({
     onAuthExpired,
     refreshCodingTask,
     refreshContextUsage,
+    refreshInterviewProgress,
     scheduleAutoEnd,
     sessionId,
   ]);
@@ -2729,11 +3040,14 @@ function ChatView({
   return (
     <div className={`chat-view ${codingTask ? 'with-coding' : ''} ${debugRationaleEnabled ? 'with-rationale-debug' : ''}`}>
       <header className="chat-header">
-        <div className="chat-header-info">
-          <div className="chat-header-dot" />
-          <span className="chat-header-domain">{DOMAIN_LABELS[domain] || domain}</span>
-          <span className="chat-header-sep">/</span>
-          <span className="chat-header-diff">{diffLabel}</span>
+        <div className="chat-header-main">
+          <div className="chat-header-info">
+            <div className="chat-header-dot" />
+            <span className="chat-header-domain">{DOMAIN_LABELS[domain] || domain}</span>
+            <span className="chat-header-sep">/</span>
+            <span className="chat-header-diff">{diffLabel}</span>
+          </div>
+          {interviewProgress && <InterviewProgressMeter progress={interviewProgress} />}
         </div>
         <div className="chat-header-actions">
           {contextUsage && <ContextUsageMeter usage={contextUsage} />}
@@ -3334,6 +3648,7 @@ function UserApp() {
   const [difficulty, setDifficulty] = useState('');
   const [username, setUsername] = useState('');
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [interviewProgress, setInterviewProgress] = useState<InterviewProgress | null>(null);
   const [historyNoticeDismissed, setHistoryNoticeDismissed] = useState(() => hasDismissedHistoryNotice());
   const [historyManageModeDefault, setHistoryManageModeDefault] = useState(false);
   const [resourceLoadError, setResourceLoadError] = useState('');
@@ -3546,6 +3861,7 @@ function UserApp() {
         setDomain(detail.session.domain);
         setDifficulty(detail.session.difficulty);
         setChatMessages(toChatMessages(detail.messages));
+        setInterviewProgress(detail.progress);
         setView('chat');
       })
       .catch((err) => {
@@ -3569,13 +3885,27 @@ function UserApp() {
     profileCompany: string,
     profilePosition: string,
     resumeId: number | null,
+    questionTier: QuestionTier,
+    intensity: InterviewIntensity,
+    focusAreas: string[],
   ) => {
     try {
-      const created = await createSession(d, diff, jd, profileCompany, profilePosition, resumeId);
+      const created = await createSession(
+        d,
+        diff,
+        jd,
+        profileCompany,
+        profilePosition,
+        resumeId,
+        questionTier,
+        intensity,
+        focusAreas,
+      );
       setSessionId(created.sessionId);
       setDomain(d);
       setDifficulty(diff);
       setChatMessages(toChatMessages(created.messages));
+      setInterviewProgress(created.progress);
       latestPathRef.current = ROUTES.interview(created.sessionId);
       navigate(routeWithDebugFlag(ROUTES.interview(created.sessionId)));
       setView('chat');
@@ -3595,6 +3925,7 @@ function UserApp() {
     navigateToView('dashboard');
     setSessionId('');
     setChatMessages([]);
+    setInterviewProgress(null);
   };
 
   const handlePause = async () => {
@@ -3613,6 +3944,7 @@ function UserApp() {
     navigateToView('dashboard');
     setSessionId('');
     setChatMessages([]);
+    setInterviewProgress(null);
   };
 
   const handleResume = (detail: InterviewSessionDetail) => {
@@ -3620,6 +3952,7 @@ function UserApp() {
     setDomain(detail.session.domain);
     setDifficulty(detail.session.difficulty);
     setChatMessages(toChatMessages(detail.messages));
+    setInterviewProgress(detail.progress);
     latestPathRef.current = ROUTES.interview(detail.session.id);
     navigate(routeWithDebugFlag(ROUTES.interview(detail.session.id)));
     setView('chat');
@@ -3628,6 +3961,7 @@ function UserApp() {
   const goHome = () => {
     setSessionId('');
     setChatMessages([]);
+    setInterviewProgress(null);
     setHistoryManageModeDefault(false);
     navigateToView('dashboard');
   };
@@ -3728,6 +4062,7 @@ function UserApp() {
           domain={domain}
           difficulty={difficulty}
           initialMessages={chatMessages}
+          initialProgress={interviewProgress}
           theme={theme}
           onToggleTheme={toggleTheme}
           onPause={handlePause}

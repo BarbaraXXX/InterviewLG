@@ -7,7 +7,7 @@
 真实大厂面经驱动 · 流式对话 · 手撕代码平台 · 多阶段状态机 · 三级记忆 · MCP 工具集成
 
 [![CI](https://github.com/BarbaraXXX/InterviewLG/actions/workflows/ci.yml/badge.svg)](https://github.com/BarbaraXXX/InterviewLG/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v1.12.0-blue)](docs/git-version-history.md)
+[![Version](https://img.shields.io/badge/version-v1.13.0-blue)](docs/git-version-history.md)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/Node.js-22.13+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -27,6 +27,7 @@ InterviewLG 是一个面向求职者与面试官训练场景的端到端面试�
 - **手撕代码平台**：内置 Hot100 算法题库，面试中实时出题、在线写代码、支持 Python / Java / C++ / JavaScript / TypeScript 等多语言。
 - **8 大技术方向**：后端、前端、全栈、算法、嵌入式、DevOps、数据、安全，覆盖主流求职场景。
 - **JD 定制面试**：贴入目标岗位 JD，LLM 自动结构化并调整面试侧重，针对性训练。
+- **可控问题预算**：支持精简 6 题、标准 10 题、深入 15 题三档；标准和深入档包含手撕代码，并可选择引导、标准、压力三种强度。
 - **完整工程化**：JWT 鉴权、SSE 流式、SQLite 持久化、Docker 一键部署、Nginx 反代 + Let's Encrypt 自动续期，生产级开箱即用。
 
 ---
@@ -48,6 +49,7 @@ InterviewLG 是一个面向求职者与面试官训练场景的端到端面试�
 - 🎙 **流式 SSE 输出**：token 级实时流式，对话体验丝滑
 - 🧠 **三级记忆系统**：话题摘要 / 滚动摘要 / 用户级跨会话偏好
 - 🎯 **多阶段状态机**：opening → project → technical → coding → summary，自动推进
+- 🧭 **版本化面试计划**：新会话保存 Blueprint，以问题数控制阶段预算、训练重点和手撕环节
 - 📚 **RAG 检索增强**：基于真实面经 QuestionCard 的语义检索，按领域过滤
 - 🔧 **MCP 工具集成**：支持 HTTP / stdio MCP server，工具可插拔
 - 📝 **JD 智能解析**：LLM 结构化 JD，沙箱式注入系统提示词
@@ -79,7 +81,7 @@ InterviewLG 是一个面向求职者与面试官训练场景的端到端面试�
 1. 前端选择领域 / 难度 / JD / 偏好 → `POST /api/sessions` 创建会话
 2. Agent 调 vectordb 拉取 Profile → LLM 结构化 JD → 注入系统提示词
 3. 面试全程由 LangGraph Agent 驱动：每轮组装上下文（消息 + 滚动摘要 + 状态 + 记忆 + 阶段控制 + RAG 卡片）→ SSE 流式输出
-4. 每轮结束后台触发状态评估：LLM 提取话题状态 / 答案质量，更新阶段状态机，必要时生成话题摘要
+4. 新会话由 Blueprint Controller 按问题预算确定下一阶段；每轮回复后同步完成 Topic / 回答质量评估，必要时生成话题摘要，再允许进入下一题
 5. 会话结束后台触发用户偏好记忆合并：把本会话话题摘要合并为跨会话用户偏好画像
 
 更详细的架构与模块设计见 [docs/Trae/CodeWiki.md](docs/Trae/CodeWiki.md)。

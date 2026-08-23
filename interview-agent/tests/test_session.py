@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from interview_agent.db import (
+    advance_session_state,
     create_message,
     create_session,
     create_user,
@@ -12,9 +13,12 @@ from interview_agent.db import (
     get_next_message_seq,
     get_session,
     get_session_messages,
+    get_session_state,
     init_db,
     list_user_sessions,
+    rollback_session_turn,
 )
+from interview_agent.interview_blueprint import build_interview_blueprint
 from interview_agent.session import OPENING_MESSAGE, SessionManager
 
 
@@ -232,6 +236,32 @@ async def test_init_db_repairs_legacy_duplicate_message_sequences(mock_agent_bui
     rows = await get_session_messages(sid)
     assert [row["seq"] for row in rows] == [0, 1]
     assert [row["content"] for row in rows] == [OPENING_MESSAGE, "重复序号消息"]
+
+
+async def test_failed_turn_rolls_back_user_message_and_blueprint_state(mock_agent_build, isolate_env):
+    await init_db()
+    user_id = await _make_user("alice")
+    mgr = SessionManager()
+    blueprint = build_interview_blueprint(question_tier="standard")
+    sid = await mgr.create(
+        "backend",
+        "campus_fulltime",
+        "alice",
+        user_id,
+        blueprint=blueprint,
+    )
+    previous_state = await get_session_state(sid)
+    user_seq = await mgr.append_message(sid, "user", "本轮会失败")
+    await advance_session_state(sid, "campus_fulltime")
+
+    await rollback_session_turn(sid, user_seq, previous_state)
+
+    rows = await get_session_messages(sid)
+    assert [row["content"] for row in rows] == [OPENING_MESSAGE]
+    restored = await get_session_state(sid)
+    assert restored["stage"] == previous_state["stage"]
+    assert restored["total_round"] == previous_state["total_round"]
+    assert restored["answered_questions"] == previous_state["answered_questions"]
 
 
 async def test_expire_stale_sessions_keeps_history(isolate_env):

@@ -4,12 +4,13 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 import httpx
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -37,6 +38,7 @@ from interview_agent.db import (
     get_coding_task_for_user,
     get_monitoring_overview,
     get_resume_for_user,
+    get_session_blueprint,
     get_session_for_user,
     get_session_messages,
     get_session_state,
@@ -49,12 +51,14 @@ from interview_agent.db import (
     list_session_coding_tasks,
     list_user_resumes,
     list_user_sessions,
+    rollback_session_turn,
     save_coding_task_draft_for_user,
     submit_coding_task_for_user,
     update_resume,
     update_user_presence,
     upsert_user_interview_config,
 )
+from interview_agent.interview_blueprint import build_interview_blueprint, build_interview_progress
 from interview_agent.logging_config import setup_logging
 from interview_agent.memory import (
     load_memory_context,
@@ -181,6 +185,11 @@ async def _increment_usage_safely(metric: str) -> None:
         await increment_usage_metric(metric)
     except Exception:
         logger.warning("usage metric update failed metric=%s", metric, exc_info=True)
+
+
+def _ensure_turn_not_running(session_id: str) -> None:
+    if session_turn_coordinator.is_busy(session_id):
+        raise HTTPException(status_code=409, detail="An interview turn is in progress; retry after it finishes")
 
 
 @app.post("/api/auth/register")
@@ -327,6 +336,11 @@ async def transcribe_speech(
     return {"text": result.text, "duration_ms": duration_ms}
 
 
+QuestionTier = Literal["compact", "standard", "deep"]
+InterviewIntensity = Literal["guided", "standard", "pressure"]
+FocusArea = Literal["project_depth", "technical_foundation", "system_design", "coding", "communication"]
+
+
 class CreateSessionRequest(BaseModel):
     domain: str
     difficulty: str = "campus_fulltime"
@@ -334,6 +348,9 @@ class CreateSessionRequest(BaseModel):
     profile_company: str = ""
     profile_position: str = ""
     resume_id: int | None = None
+    question_tier: QuestionTier = "standard"
+    intensity: InterviewIntensity = "standard"
+    focus_areas: list[FocusArea] = Field(default_factory=list, max_length=2)
 
 
 def _sanitize_path_segment(value: str) -> str:
@@ -554,6 +571,9 @@ def _serialize_interview_config(config: dict | None) -> dict | None:
         "profile_company": config["profile_company"],
         "profile_position": config["profile_position"],
         "resume_id": config["resume_id"],
+        "question_tier": config.get("question_tier", "standard"),
+        "intensity": config.get("intensity", "standard"),
+        "focus_areas": _parse_json_list(str(config.get("focus_areas") or "[]")),
         "updated_at": config["updated_at"],
     }
 
@@ -572,6 +592,15 @@ def _parse_json_dict(value: str) -> dict:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+async def _load_interview_plan_state(session_id: str) -> dict:
+    blueprint = await get_session_blueprint(session_id)
+    if blueprint is None:
+        return {"blueprint": None, "progress": None}
+    state = await get_session_state(session_id)
+    progress = build_interview_progress(blueprint, state)
+    return {"blueprint": blueprint, "progress": progress}
 
 
 def _serialize_coding_task(task: dict | None) -> dict | None:
@@ -841,6 +870,14 @@ async def create_session(
         raise HTTPException(status_code=400, detail="Job description too long")
     if len(req.profile_company) > 128 or len(req.profile_position) > 128:
         raise HTTPException(status_code=400, detail="Profile company/position too long")
+    if req.question_tier == "compact" and "coding" in req.focus_areas:
+        raise HTTPException(status_code=400, detail="Compact interviews do not include coding focus")
+
+    blueprint = build_interview_blueprint(
+        question_tier=req.question_tier,
+        intensity=req.intensity,
+        focus_areas=req.focus_areas,
+    )
 
     user = await get_user_by_username(username)
     if user is None:
@@ -883,6 +920,7 @@ async def create_session(
         structured_jd,
         structured_profile,
         resume_title_snapshot,
+        blueprint=blueprint,
     )
     await upsert_user_interview_config(
         user_id=user_id,
@@ -892,6 +930,9 @@ async def create_session(
         profile_company=req.profile_company.strip(),
         profile_position=req.profile_position.strip(),
         resume_id=req.resume_id,
+        question_tier=blueprint["question_tier"],
+        intensity=blueprint["intensity"],
+        focus_areas=json.dumps(blueprint["focus_areas"], ensure_ascii=False),
     )
     logger.info(
         "create_session user=%s session=%s domain=%s difficulty=%s jd_len=%d profile_len=%d",
@@ -899,7 +940,11 @@ async def create_session(
     )
     await _increment_usage_safely("session_created")
     messages = await get_session_messages(session_id)
-    return {"session_id": session_id, "messages": messages}
+    return {
+        "session_id": session_id,
+        "messages": messages,
+        **await _load_interview_plan_state(session_id),
+    }
 
 
 async def _get_current_user_row(username: str) -> dict:
@@ -922,6 +967,17 @@ async def update_user_memory_safely(user_id: int, session_id: str) -> None:
             return
 
 
+async def _complete_interview_session(user_id: int, session_id: str) -> bool:
+    session = await get_session_for_user(session_id, user_id)
+    if session is None or session["status"] == "completed":
+        return False
+    await session_manager.end_session(session_id)
+    _CONTEXT_USAGE_CACHE.pop(session_id, None)
+    await _increment_usage_safely("session_completed")
+    asyncio.create_task(update_user_memory_safely(user_id, session_id))
+    return True
+
+
 @app.get("/api/sessions")
 async def list_sessions(username: str = Depends(get_current_user), limit: int = 20) -> dict:
     user = await _get_current_user_row(username)
@@ -936,6 +992,11 @@ async def delete_sessions(req: DeleteSessionsRequest, username: str = Depends(ge
     session_ids = [session_id.strip() for session_id in dict.fromkeys(req.session_ids) if session_id.strip()]
     if len(session_ids) > 100:
         raise HTTPException(status_code=400, detail="Too many sessions to delete")
+    for session_id in session_ids:
+        if session_turn_coordinator.is_busy(session_id):
+            owned_session = await get_session_for_user(session_id, user["id"])
+            if owned_session is not None:
+                _ensure_turn_not_running(session_id)
     deleted = await session_manager.delete_many(session_ids, username, user["id"])
     for session_id in session_ids:
         _CONTEXT_USAGE_CACHE.pop(session_id, None)
@@ -954,7 +1015,17 @@ async def get_session_detail(session_id: str, username: str = Depends(get_curren
         "session": _serialize_session(session),
         "messages": messages,
         "coding_tasks": [_serialize_coding_task(task) for task in coding_tasks],
+        **await _load_interview_plan_state(session_id),
     }
+
+
+@app.get("/api/sessions/{session_id}/progress")
+async def get_session_progress(session_id: str, username: str = Depends(get_current_user)) -> dict:
+    user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return await _load_interview_plan_state(session_id)
 
 
 async def _estimate_session_context_usage(session: dict, user_id: int) -> dict:
@@ -1070,10 +1141,8 @@ async def end_session(session_id: str, username: str = Depends(get_current_user)
     session = await get_session_for_user(session_id, user["id"])
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    await session_manager.end_session(session_id)
-    _CONTEXT_USAGE_CACHE.pop(session_id, None)
-    await _increment_usage_safely("session_completed")
-    asyncio.create_task(update_user_memory_safely(user["id"], session_id))
+    _ensure_turn_not_running(session_id)
+    await _complete_interview_session(user["id"], session_id)
     return {"ok": True}
 
 
@@ -1083,6 +1152,7 @@ async def pause_session(session_id: str, username: str = Depends(get_current_use
     session = await get_session_for_user(session_id, user["id"])
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_turn_not_running(session_id)
     if session["status"] != "active":
         raise HTTPException(status_code=409, detail="Only active sessions can be paused")
     await session_manager.pause_session(session_id)
@@ -1109,6 +1179,8 @@ async def resume_session(session_id: str, username: str = Depends(get_current_us
     return {
         "session": _serialize_session(updated),
         "messages": messages,
+        "coding_tasks": [_serialize_coding_task(task) for task in await list_session_coding_tasks(session_id)],
+        **await _load_interview_plan_state(session_id),
     }
 
 
@@ -1120,12 +1192,17 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
         raise HTTPException(status_code=400, detail="Context message too long")
 
     user = await _get_current_user_row(username)
+    session_row = await get_session_for_user(req.session_id, user["id"])
+    if session_row is None:
+        raise HTTPException(status_code=404, detail="Session not found")
 
     try:
         await session_turn_coordinator.acquire(req.session_id)
     except SessionTurnBusyError as exc:
         raise HTTPException(status_code=409, detail="Another interview turn is already in progress") from exc
 
+    previous_state: dict | None = None
+    user_message_seq: int | None = None
     try:
         rationale_debug_enabled = bool(question_rationale_settings.enabled and req.debug_rationale)
         ses = await session_manager.get_or_rebuild_agent(
@@ -1136,9 +1213,9 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
         )
         if ses is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        session_row = await get_session_for_user(req.session_id, user["id"])
-        if session_row is None:
-            raise HTTPException(status_code=404, detail="Session not found")
+        previous_state = await get_session_state(req.session_id)
+        if previous_state is None:
+            raise HTTPException(status_code=409, detail="Session state is unavailable")
 
         logger.info(
             "chat_stream start user=%s session=%s msg_len=%d rationale_debug=%s",
@@ -1153,7 +1230,12 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
         display_message = req.message.strip()
         context_message = req.context_message.strip()
-        await session_manager.append_message(req.session_id, "user", display_message)
+        user_message_seq = await session_manager.append_message(
+            req.session_id,
+            "user",
+            display_message,
+            trim=False,
+        )
         await _increment_usage_safely("chat_turn")
         active_coding_task = await get_active_coding_task(req.session_id)
         await advance_session_state(
@@ -1207,6 +1289,11 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
         )
         _CONTEXT_USAGE_CACHE[req.session_id] = usage
     except Exception:
+        if previous_state is not None and user_message_seq is not None:
+            try:
+                await rollback_session_turn(req.session_id, user_message_seq, previous_state)
+            except Exception:
+                logger.exception("failed to roll back interview turn preparation session=%s", req.session_id)
         session_turn_coordinator.release(req.session_id)
         raise
 
@@ -1216,11 +1303,13 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                 session_id=req.session_id,
                 user_message=user_message,
                 agent_reply=agent_reply,
+                answered_stage=str(previous_state.get("stage") or "") if previous_state else None,
             )
         except Exception:
             logger.warning("interview state update failed session=%s", req.session_id, exc_info=True)
 
     async def event_generator():
+        turn_persisted = False
         try:
             full_content = ""
             rationale_sent = False
@@ -1255,9 +1344,15 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
                 elif kind == "on_tool_end":
                     yield f"data: {json.dumps({'type': 'tool_end'}, ensure_ascii=False)}\n\n"
 
-            if full_content:
-                await session_manager.append_message(req.session_id, "ai", full_content)
-                await record_interview_state_safely(context_message or display_message, full_content)
+            if not full_content:
+                raise RuntimeError("Interview agent returned an empty response")
+            await session_manager.append_message(req.session_id, "ai", full_content, trim=False)
+            await record_interview_state_safely(context_message or display_message, full_content)
+            await session_manager.trim_messages(req.session_id)
+            current_state = await get_session_state(req.session_id)
+            if current_state and current_state.get("stage") == "summary":
+                await _complete_interview_session(user["id"], req.session_id)
+            turn_persisted = True
             if rationale_debug_enabled and not rationale_sent:
                 logger.info("question rationale missing session=%s", req.session_id)
                 yield (
@@ -1266,6 +1361,12 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             logger.info("chat_stream end user=%s session=%s reply_len=%d", username, req.session_id, len(full_content))
             yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
         finally:
+            if not turn_persisted and previous_state is not None and user_message_seq is not None:
+                try:
+                    await rollback_session_turn(req.session_id, user_message_seq, previous_state)
+                    _CONTEXT_USAGE_CACHE.pop(req.session_id, None)
+                except Exception:
+                    logger.exception("failed to roll back incomplete interview turn session=%s", req.session_id)
             session_turn_coordinator.release(req.session_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
@@ -1276,6 +1377,10 @@ async def delete_session(
     session_id: str, username: str = Depends(get_current_user)
 ) -> dict:
     user = await _get_current_user_row(username)
+    session = await get_session_for_user(session_id, user["id"])
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    _ensure_turn_not_running(session_id)
     deleted = await session_manager.delete(session_id, username, user["id"])
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")

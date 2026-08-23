@@ -7,6 +7,12 @@ from pathlib import Path
 
 import aiosqlite
 
+from interview_agent.interview_blueprint import (
+    build_interview_progress,
+    deserialize_blueprint,
+    serialize_blueprint,
+    stage_for_answered_questions,
+)
 from interview_agent.interview_state import (
     complete_stage_and_choose_next,
     dump_stage_plan,
@@ -90,6 +96,14 @@ async def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS session_blueprints (
+                session_id TEXT PRIMARY KEY,
+                blueprint_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS user_interview_configs (
                 user_id INTEGER PRIMARY KEY,
                 domain TEXT NOT NULL,
@@ -98,6 +112,9 @@ async def init_db() -> None:
                 profile_company TEXT NOT NULL DEFAULT '',
                 profile_position TEXT NOT NULL DEFAULT '',
                 resume_id INTEGER,
+                question_tier TEXT NOT NULL DEFAULT 'standard',
+                intensity TEXT NOT NULL DEFAULT 'standard',
+                focus_areas TEXT NOT NULL DEFAULT '[]',
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
@@ -152,6 +169,7 @@ async def init_db() -> None:
                 stage TEXT NOT NULL DEFAULT 'opening',
                 stage_round INTEGER NOT NULL DEFAULT 0,
                 total_round INTEGER NOT NULL DEFAULT 0,
+                answered_questions INTEGER NOT NULL DEFAULT 0,
                 current_topic TEXT NOT NULL DEFAULT '',
                 topic_status TEXT NOT NULL DEFAULT 'not_started',
                 covered_topics TEXT NOT NULL DEFAULT '[]',
@@ -232,6 +250,10 @@ async def init_db() -> None:
         await _ensure_column(db, "session_states", "current_topic", "TEXT NOT NULL DEFAULT ''")
         await _ensure_column(db, "session_states", "topic_status", "TEXT NOT NULL DEFAULT 'not_started'")
         await _ensure_column(db, "session_states", "stage_goal_status", "TEXT NOT NULL DEFAULT '{}'")
+        await _ensure_column(db, "session_states", "answered_questions", "INTEGER NOT NULL DEFAULT 0")
+        await _ensure_column(db, "user_interview_configs", "question_tier", "TEXT NOT NULL DEFAULT 'standard'")
+        await _ensure_column(db, "user_interview_configs", "intensity", "TEXT NOT NULL DEFAULT 'standard'")
+        await _ensure_column(db, "user_interview_configs", "focus_areas", "TEXT NOT NULL DEFAULT '[]'")
         await _ensure_unique_message_sequences(db)
         await db.commit()
         logger.info("database initialized at %s", _DB_PATH)
@@ -369,6 +391,7 @@ async def create_session(
     structured_jd: str = "",
     structured_profile: str = "",
     resume_title_snapshot: str = "",
+    blueprint: dict | None = None,
 ) -> None:
     db = await get_db()
     try:
@@ -387,10 +410,18 @@ async def create_session(
                 resume_title_snapshot,
             ),
         )
+        stage_plan = initial_stage_plan("opening")
+        if blueprint is not None and not blueprint.get("include_coding", True):
+            stage_plan["coding"] = "skipped"
         await db.execute(
             "INSERT INTO session_states (session_id, target, stage_goal_status) VALUES (?, ?, ?)",
-            (session_id, difficulty, dump_stage_plan(initial_stage_plan("opening"))),
+            (session_id, difficulty, dump_stage_plan(stage_plan)),
         )
+        if blueprint is not None:
+            await db.execute(
+                "INSERT INTO session_blueprints (session_id, blueprint_json) VALUES (?, ?)",
+                (session_id, serialize_blueprint(blueprint)),
+            )
         await db.commit()
         logger.info("session created id=%s user=%s", session_id, username)
     finally:
@@ -401,15 +432,33 @@ async def get_session_state(session_id: str) -> dict | None:
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT session_id, target, stage, stage_round, total_round, covered_topics, "
-            "current_topic, topic_status, pending_focus, last_user_quality, stage_goal_status, updated_at "
-            "FROM session_states WHERE session_id = ?",
+            "SELECT ss.session_id, ss.target, ss.stage, ss.stage_round, ss.total_round, "
+            "ss.answered_questions, ss.covered_topics, "
+            "ss.current_topic, ss.topic_status, ss.pending_focus, ss.last_user_quality, "
+            "ss.stage_goal_status, ss.updated_at, sb.blueprint_json "
+            "FROM session_states ss LEFT JOIN session_blueprints sb ON sb.session_id = ss.session_id "
+            "WHERE ss.session_id = ?",
             (session_id,),
         ) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
     finally:
         await db.close()
+
+
+async def get_session_blueprint(session_id: str) -> dict | None:
+    db = await get_db()
+    try:
+        async with db.execute(
+            "SELECT blueprint_json FROM session_blueprints WHERE session_id = ?",
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+    finally:
+        await db.close()
+    if row is None:
+        return None
+    return deserialize_blueprint(str(row["blueprint_json"]))
 
 
 async def ensure_session_state(session_id: str, target: str = "campus_fulltime") -> dict:
@@ -634,10 +683,19 @@ async def advance_session_state(
     row = await ensure_session_state(session_id, target)
     old_stage = row["stage"]
     total_round = int(row["total_round"]) + 1
+    answered_questions = int(row.get("answered_questions") or 0)
+    if not (has_active_coding_task and not is_coding_submission):
+        answered_questions += 1
 
     stage = old_stage
     stage_goal_status = str(row.get("stage_goal_status") or "{}")
-    if has_active_coding_task or (old_stage == "coding" and is_coding_submission):
+    blueprint = await get_session_blueprint(session_id)
+    if blueprint is not None:
+        stage = stage_for_answered_questions(blueprint, answered_questions)
+        if has_active_coding_task:
+            stage = "coding"
+        stage_goal_status = dump_stage_plan(_blueprint_stage_plan(blueprint, stage))
+    elif has_active_coding_task or (old_stage == "coding" and is_coding_submission):
         stage = "coding"
         if old_stage != "coding":
             stage_goal_status = dump_stage_plan(
@@ -657,14 +715,34 @@ async def advance_session_state(
             transition_stage_plan(stage_goal_status, old_stage, stage, complete_current=True)
         )
 
-    stage_round = 1 if stage != old_stage else int(row["stage_round"]) + 1
+    stage_changed = stage != old_stage
+    if blueprint is not None:
+        progress = build_interview_progress(blueprint, {"answered_questions": answered_questions})
+        stage_round = int(progress["current_stage_answered"]) if stage == progress["stage"] else int(row["stage_round"])
+    else:
+        stage_round = 1 if stage_changed else int(row["stage_round"]) + 1
+    current_topic = "" if stage_changed and blueprint is not None else row["current_topic"]
+    topic_status = "not_started" if stage_changed and blueprint is not None else row["topic_status"]
+    pending_focus = "" if stage_changed and blueprint is not None else row["pending_focus"]
 
     db = await get_db()
     try:
         await db.execute(
-            "UPDATE session_states SET target = ?, stage = ?, stage_round = ?, total_round = ?, "
-            "stage_goal_status = ?, updated_at = datetime('now') WHERE session_id = ?",
-            (target, stage, stage_round, total_round, stage_goal_status, session_id),
+            "UPDATE session_states SET target = ?, stage = ?, stage_round = ?, total_round = ?, answered_questions = ?, "
+            "current_topic = ?, topic_status = ?, pending_focus = ?, stage_goal_status = ?, "
+            "updated_at = datetime('now') WHERE session_id = ?",
+            (
+                target,
+                stage,
+                stage_round,
+                total_round,
+                answered_questions,
+                current_topic,
+                topic_status,
+                pending_focus,
+                stage_goal_status,
+                session_id,
+            ),
         )
         await db.commit()
     finally:
@@ -674,6 +752,23 @@ async def advance_session_state(
     if updated is None:
         raise RuntimeError("Session state was not persisted")
     return updated
+
+
+def _blueprint_stage_plan(blueprint: dict, current_stage: str) -> dict[str, str]:
+    plan = {stage: "pending" for stage in ("opening", "project", "technical", "coding", "summary")}
+    if not blueprint.get("include_coding", True):
+        plan["coding"] = "skipped"
+    order = ["opening", "project", "technical"]
+    if blueprint.get("include_coding", True):
+        order.append("coding")
+    order.append("summary")
+    current_index = order.index(current_stage) if current_stage in order else 0
+    for index, stage in enumerate(order):
+        if index < current_index:
+            plan[stage] = "completed"
+        elif index == current_index:
+            plan[stage] = "active"
+    return plan
 
 
 async def get_session(session_id: str) -> dict | None:
@@ -1096,7 +1191,8 @@ async def get_user_interview_config(user_id: int) -> dict | None:
     db = await get_db()
     try:
         async with db.execute(
-            "SELECT user_id, domain, difficulty, job_description, profile_company, profile_position, resume_id, updated_at "
+            "SELECT user_id, domain, difficulty, job_description, profile_company, profile_position, resume_id, "
+            "question_tier, intensity, focus_areas, updated_at "
             "FROM user_interview_configs WHERE user_id = ?",
             (user_id,),
         ) as cursor:
@@ -1114,13 +1210,17 @@ async def upsert_user_interview_config(
     profile_company: str,
     profile_position: str,
     resume_id: int | None,
+    question_tier: str = "standard",
+    intensity: str = "standard",
+    focus_areas: str = "[]",
 ) -> None:
     db = await get_db()
     try:
         await db.execute(
             "INSERT INTO user_interview_configs "
-            "(user_id, domain, difficulty, job_description, profile_company, profile_position, resume_id, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now')) "
+            "(user_id, domain, difficulty, job_description, profile_company, profile_position, resume_id, "
+            "question_tier, intensity, focus_areas, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now')) "
             "ON CONFLICT(user_id) DO UPDATE SET "
             "domain = excluded.domain, "
             "difficulty = excluded.difficulty, "
@@ -1128,8 +1228,22 @@ async def upsert_user_interview_config(
             "profile_company = excluded.profile_company, "
             "profile_position = excluded.profile_position, "
             "resume_id = excluded.resume_id, "
+            "question_tier = excluded.question_tier, "
+            "intensity = excluded.intensity, "
+            "focus_areas = excluded.focus_areas, "
             "updated_at = datetime('now')",
-            (user_id, domain, difficulty, job_description, profile_company, profile_position, resume_id),
+            (
+                user_id,
+                domain,
+                difficulty,
+                job_description,
+                profile_company,
+                profile_position,
+                resume_id,
+                question_tier,
+                intensity,
+                focus_areas,
+            ),
         )
         await db.commit()
         logger.info("interview config saved user_id=%s", user_id)
@@ -1386,6 +1500,45 @@ async def append_message_with_next_seq(session_id: str, role: str, content: str)
         )
         await db.commit()
         return next_seq
+    except Exception:
+        await db.rollback()
+        raise
+    finally:
+        await db.close()
+
+
+async def rollback_session_turn(session_id: str, first_message_seq: int, previous_state: dict) -> None:
+    """Remove an incomplete turn and restore its pre-turn state atomically."""
+
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        await db.execute(
+            "DELETE FROM messages WHERE session_id = ? AND seq >= ?",
+            (session_id, first_message_seq),
+        )
+        await db.execute(
+            "UPDATE session_states SET target = ?, stage = ?, stage_round = ?, total_round = ?, "
+            "answered_questions = ?, current_topic = ?, topic_status = ?, covered_topics = ?, "
+            "pending_focus = ?, last_user_quality = ?, stage_goal_status = ?, updated_at = datetime('now') "
+            "WHERE session_id = ?",
+            (
+                previous_state["target"],
+                previous_state["stage"],
+                previous_state["stage_round"],
+                previous_state["total_round"],
+                previous_state.get("answered_questions", 0),
+                previous_state["current_topic"],
+                previous_state["topic_status"],
+                previous_state["covered_topics"],
+                previous_state["pending_focus"],
+                previous_state["last_user_quality"],
+                previous_state["stage_goal_status"],
+                session_id,
+            ),
+        )
+        await db.commit()
+        logger.info("rolled back incomplete interview turn session=%s from_seq=%d", session_id, first_message_seq)
     except Exception:
         await db.rollback()
         raise

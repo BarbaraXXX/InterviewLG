@@ -1,6 +1,14 @@
 import json
 
-from interview_agent.db import create_session, create_user, get_session_state, init_db, update_session_state_control
+from interview_agent.db import (
+    advance_session_state,
+    create_session,
+    create_user,
+    get_session_state,
+    init_db,
+    update_session_state_control,
+)
+from interview_agent.interview_blueprint import build_interview_blueprint
 from interview_agent.state_updater import apply_state_update, normalize_state_update
 
 
@@ -72,6 +80,61 @@ async def test_apply_state_update_dedupes_covered_topic(isolate_env):
     assert len(covered) == 1
     assert covered[0]["quality"] == "good"
     assert covered[0]["notes"] == "更新记录"
+
+
+async def test_blueprint_controller_ignores_evaluator_stage_change(isolate_env):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session(
+        "sid-state",
+        user_id,
+        "alice",
+        "backend",
+        "campus_fulltime",
+        blueprint=build_interview_blueprint(question_tier="standard"),
+    )
+    await advance_session_state("sid-state", "campus_fulltime")
+
+    updated = await apply_state_update(
+        "sid-state",
+        {
+            "stage": "summary",
+            "current_topic": "项目架构",
+            "topic_status": "probing",
+            "last_user_quality": "partial",
+        },
+    )
+
+    assert updated is not None
+    assert updated["stage"] == "project"
+
+
+async def test_completed_topic_keeps_the_answered_stage_across_blueprint_transition(isolate_env):
+    await init_db()
+    user_id = await create_user("alice", "hash")
+    await create_session(
+        "sid-state",
+        user_id,
+        "alice",
+        "backend",
+        "campus_fulltime",
+        blueprint=build_interview_blueprint(question_tier="standard"),
+    )
+    await update_session_state_control("sid-state", stage="technical")
+
+    updated = await apply_state_update(
+        "sid-state",
+        {
+            "current_topic": "订单项目",
+            "topic_status": "completed",
+            "last_user_quality": "good",
+            "covered_topic": {"topic": "订单项目", "quality": "good", "notes": "回答完整"},
+        },
+        answered_stage="project",
+    )
+
+    covered = json.loads(updated["covered_topics"])
+    assert covered[0]["stage"] == "project"
 
 
 def test_normalize_state_update_rejects_invalid_values():
