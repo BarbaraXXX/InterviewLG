@@ -1,18 +1,39 @@
 const API_BASE = '/api';
-const interviewSessionListRequests = new Map<number, Promise<InterviewSessionSummary[]>>();
+interface UserScopedRequest<T> {
+  epoch: number;
+  promise: Promise<T>;
+}
+
+interface UserScopedCache<T> {
+  epoch: number;
+  value: T;
+  expiresAt: number;
+}
+
+let userAuthEpoch = 0;
+const interviewSessionListRequests = new Map<number, UserScopedRequest<InterviewSessionSummary[]>>();
 let authCheckRequest: Promise<{ username: string } | null> | null = null;
 let adminAuthCheckRequest: Promise<{ username: string } | null> | null = null;
 let domainsRequest: Promise<string[]> | null = null;
-let profilesRequest: Promise<ProfileSummary[]> | null = null;
-let resumesRequest: Promise<Resume[]> | null = null;
+let profilesRequest: UserScopedRequest<ProfileSummary[]> | null = null;
+let resumesRequest: UserScopedRequest<Resume[]> | null = null;
 let domainsCache: { value: string[]; expiresAt: number } | null = null;
-let profilesCache: { value: ProfileSummary[]; expiresAt: number } | null = null;
-let resumesCache: { value: Resume[]; expiresAt: number } | null = null;
+let profilesCache: UserScopedCache<ProfileSummary[]> | null = null;
+let resumesCache: UserScopedCache<Resume[]> | null = null;
 
 const DOMAIN_CACHE_TTL_MS = 5 * 60 * 1000;
 const SETUP_RESOURCE_CACHE_TTL_MS = 15 * 1000;
 
 function invalidateResumeCache(): void {
+  resumesCache = null;
+  resumesRequest = null;
+}
+
+export function resetUserScopedApiState(): void {
+  userAuthEpoch += 1;
+  interviewSessionListRequests.clear();
+  profilesCache = null;
+  profilesRequest = null;
   resumesCache = null;
   resumesRequest = null;
 }
@@ -244,10 +265,13 @@ export async function getMe(): Promise<{ username: string } | null> {
 }
 
 export async function logout(): Promise<void> {
-  await fetch(`${API_BASE}/auth/logout`, {
+  const res = await fetch(`${API_BASE}/auth/logout`, {
     method: 'POST',
     credentials: 'same-origin',
   });
+  if (!res.ok) {
+    throw new Error(`Logout failed: ${res.status}`);
+  }
 }
 
 export async function adminLogin(username: string, password: string): Promise<{ username: string }> {
@@ -265,10 +289,13 @@ export async function adminLogin(username: string, password: string): Promise<{ 
 }
 
 export async function adminLogout(): Promise<void> {
-  await fetch(`${API_BASE}/admin/auth/logout`, {
+  const res = await fetch(`${API_BASE}/admin/auth/logout`, {
     method: 'POST',
     credentials: 'same-origin',
   });
+  if (!res.ok) {
+    throw new Error(`Admin logout failed: ${res.status}`);
+  }
 }
 
 export async function getAdminMe(): Promise<{ username: string } | null> {
@@ -343,9 +370,12 @@ export async function fetchDomains(): Promise<string[]> {
 }
 
 export async function fetchProfiles(): Promise<ProfileSummary[]> {
-  if (profilesCache && profilesCache.expiresAt > Date.now()) return profilesCache.value;
-  if (profilesRequest) return profilesRequest;
-  profilesRequest = fetch(`${API_BASE}/profiles`, {
+  const requestEpoch = userAuthEpoch;
+  if (profilesCache && profilesCache.epoch === requestEpoch && profilesCache.expiresAt > Date.now()) {
+    return profilesCache.value;
+  }
+  if (profilesRequest?.epoch === requestEpoch) return profilesRequest.promise;
+  const promise = fetch(`${API_BASE}/profiles`, {
     headers: authHeaders(),
     credentials: 'same-origin',
   })
@@ -354,19 +384,27 @@ export async function fetchProfiles(): Promise<ProfileSummary[]> {
       if (!res.ok) throw new Error(`Failed to fetch profiles: ${res.status}`);
       const data = await res.json();
       const value = data.profiles || [];
-      profilesCache = { value, expiresAt: Date.now() + SETUP_RESOURCE_CACHE_TTL_MS };
+      if (requestEpoch === userAuthEpoch) {
+        profilesCache = { epoch: requestEpoch, value, expiresAt: Date.now() + SETUP_RESOURCE_CACHE_TTL_MS };
+      }
       return value;
     })
     .finally(() => {
-      profilesRequest = null;
+      if (profilesRequest?.epoch === requestEpoch) {
+        profilesRequest = null;
+      }
     });
-  return profilesRequest;
+  profilesRequest = { epoch: requestEpoch, promise };
+  return promise;
 }
 
 export async function fetchResumes(): Promise<Resume[]> {
-  if (resumesCache && resumesCache.expiresAt > Date.now()) return resumesCache.value;
-  if (resumesRequest) return resumesRequest;
-  resumesRequest = fetch(`${API_BASE}/resumes`, {
+  const requestEpoch = userAuthEpoch;
+  if (resumesCache && resumesCache.epoch === requestEpoch && resumesCache.expiresAt > Date.now()) {
+    return resumesCache.value;
+  }
+  if (resumesRequest?.epoch === requestEpoch) return resumesRequest.promise;
+  const promise = fetch(`${API_BASE}/resumes`, {
     headers: authHeaders(),
     credentials: 'same-origin',
   })
@@ -379,13 +417,18 @@ export async function fetchResumes(): Promise<Resume[]> {
       }
       const data = await res.json();
       const value = data.resumes || [];
-      resumesCache = { value, expiresAt: Date.now() + SETUP_RESOURCE_CACHE_TTL_MS };
+      if (requestEpoch === userAuthEpoch) {
+        resumesCache = { epoch: requestEpoch, value, expiresAt: Date.now() + SETUP_RESOURCE_CACHE_TTL_MS };
+      }
       return value;
     })
     .finally(() => {
-      resumesRequest = null;
+      if (resumesRequest?.epoch === requestEpoch) {
+        resumesRequest = null;
+      }
     });
-  return resumesRequest;
+  resumesRequest = { epoch: requestEpoch, promise };
+  return promise;
 }
 
 export async function fetchLastInterviewConfig(): Promise<LastInterviewConfig | null> {
@@ -502,8 +545,9 @@ export async function createSession(
 }
 
 export async function fetchInterviewSessions(limit: number = 50): Promise<InterviewSessionSummary[]> {
+  const requestEpoch = userAuthEpoch;
   const existingRequest = interviewSessionListRequests.get(limit);
-  if (existingRequest) return existingRequest;
+  if (existingRequest?.epoch === requestEpoch) return existingRequest.promise;
 
   const request = fetch(`${API_BASE}/sessions?limit=${limit}`, {
     headers: authHeaders(),
@@ -520,10 +564,12 @@ export async function fetchInterviewSessions(limit: number = 50): Promise<Interv
       return data.sessions || [];
     })
     .finally(() => {
-      interviewSessionListRequests.delete(limit);
+      if (interviewSessionListRequests.get(limit)?.epoch === requestEpoch) {
+        interviewSessionListRequests.delete(limit);
+      }
     });
 
-  interviewSessionListRequests.set(limit, request);
+  interviewSessionListRequests.set(limit, { epoch: requestEpoch, promise: request });
   return request;
 }
 

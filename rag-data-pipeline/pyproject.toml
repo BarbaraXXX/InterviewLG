@@ -1,6 +1,6 @@
 [project]
 name = "rag-data-pipeline"
-version = "1.13.0"
+version = "1.14.0"
 description = "Offline interview QuestionCard extraction and preparation pipeline"
 requires-python = ">=3.12"
 dependencies = []

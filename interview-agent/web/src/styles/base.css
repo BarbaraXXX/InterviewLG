@@ -1,0 +1,296 @@
+:root {
+  --color-bg: #07110f;
+  --color-surface: #0e1b18;
+  --color-surface-raised: #13231f;
+  --color-surface-muted: #0a1714;
+  --color-surface-hover: #183029;
+  --color-border: #29473d;
+  --color-border-subtle: #1d352e;
+  --color-text: #f0faf7;
+  --color-text-secondary: #b6cbc4;
+  --color-text-tertiary: #8ca79e;
+  --color-text-muted: #8ca79e;
+  --color-accent: #48d597;
+  --color-accent-strong: #21b878;
+  --color-accent-dim: rgba(72, 213, 151, 0.12);
+  --color-accent-border: rgba(72, 213, 151, 0.36);
+  --color-cyan: #52c9d6;
+  --color-cyan-dim: rgba(82, 201, 214, 0.11);
+  --color-warm: #f4b85d;
+  --color-warm-dim: rgba(244, 184, 93, 0.12);
+  --color-info: #52c9d6;
+  --color-info-dim: rgba(82, 201, 214, 0.11);
+  --color-user-bubble: #123f30;
+  --color-user-text: #e2fff4;
+  --color-success: #48d597;
+  --color-danger: #fb7185;
+  --color-danger-dim: rgba(251, 113, 133, 0.12);
+  --color-on-accent: #032117;
+  --color-grid-line: rgba(181, 228, 211, 0.042);
+  --color-panel-translucent: rgba(14, 27, 24, 0.86);
+  --color-topbar-bg: rgba(7, 17, 15, 0.88);
+  --color-ai-bubble: rgba(14, 27, 24, 0.92);
+  --color-config-section: rgba(14, 27, 24, 0.94);
+
+  --font-sans:
+    ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans CJK SC', sans-serif;
+  --font-mono: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, ui-monospace, monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+  --space-24: 96px;
+
+  --radius-xs: 4px;
+  --radius-sm: 7px;
+  --radius-md: 11px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-md: 0 18px 48px rgba(0, 0, 0, 0.24);
+  --shadow-lg: 0 30px 90px rgba(0, 0, 0, 0.34);
+  --shadow-accent: 0 18px 44px rgba(33, 184, 120, 0.16);
+
+  --transition-fast: 160ms cubic-bezier(0.2, 0, 0, 1);
+  --transition-base: 240ms cubic-bezier(0.2, 0, 0, 1);
+  --site-footer-height: 32px;
+  --mobile-navigation-height: 64px;
+
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  color: var(--color-text);
+  background: var(--color-bg);
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+:root[data-theme='light'] {
+  --color-bg: #f2f8f5;
+  --color-surface: #ffffff;
+  --color-surface-raised: #f8fcfa;
+  --color-surface-muted: #edf6f2;
+  --color-surface-hover: #e7f3ee;
+  --color-border: #c9ddd5;
+  --color-border-subtle: #dce9e4;
+  --color-text: #10241d;
+  --color-text-secondary: #3e6054;
+  --color-text-tertiary: #58786d;
+  --color-text-muted: #58786d;
+  --color-accent: #087f51;
+  --color-accent-strong: #076a45;
+  --color-accent-dim: rgba(8, 127, 81, 0.09);
+  --color-accent-border: rgba(8, 127, 81, 0.28);
+  --color-cyan: #087f8c;
+  --color-cyan-dim: rgba(8, 127, 140, 0.09);
+  --color-warm: #ad6509;
+  --color-warm-dim: rgba(173, 101, 9, 0.1);
+  --color-info: #087f8c;
+  --color-info-dim: rgba(8, 127, 140, 0.09);
+  --color-user-bubble: #dcfce7;
+  --color-user-text: #14532d;
+  --color-success: #087f51;
+  --color-danger: #c8324d;
+  --color-danger-dim: rgba(200, 50, 77, 0.09);
+  --color-on-accent: #ffffff;
+  --color-grid-line: rgba(16, 36, 29, 0.046);
+  --color-panel-translucent: rgba(255, 255, 255, 0.9);
+  --color-topbar-bg: rgba(248, 252, 250, 0.9);
+  --color-ai-bubble: rgba(248, 252, 250, 0.94);
+  --color-config-section: #ffffff;
+
+  --shadow-sm: 0 1px 3px rgba(16, 36, 29, 0.08);
+  --shadow-md: 0 18px 48px rgba(16, 36, 29, 0.1);
+  --shadow-lg: 0 30px 90px rgba(16, 36, 29, 0.14);
+  --shadow-accent: 0 18px 44px rgba(8, 127, 81, 0.14);
+
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  scroll-behavior: smooth;
+  scroll-padding-top: 96px;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow-x: hidden;
+  color: var(--color-text);
+  background:
+    radial-gradient(circle at 16% -8%, rgba(72, 213, 151, 0.1), transparent 30rem),
+    radial-gradient(circle at 88% 14%, rgba(82, 201, 214, 0.08), transparent 26rem),
+    linear-gradient(var(--color-grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-grid-line) 1px, transparent 1px), var(--color-bg);
+  background-size:
+    auto,
+    auto,
+    48px 48px,
+    48px 48px,
+    auto;
+}
+
+body,
+button,
+input,
+textarea,
+select {
+  font-family: var(--font-sans);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: inherit;
+}
+
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+::selection {
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+}
+
+#root {
+  min-width: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.route-loading {
+  width: min(calc(100% - 32px), 440px);
+  min-height: 100vh;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  color: var(--color-text);
+}
+
+.route-loading > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.route-loading strong {
+  font-size: 0.95rem;
+}
+
+.route-loading span {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+}
+
+.route-error {
+  width: min(calc(100% - 32px), 520px);
+  min-height: 100vh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-4);
+  color: var(--color-text);
+}
+
+.route-error h1 {
+  font-size: clamp(1.6rem, 5vw, 2.2rem);
+  line-height: 1.2;
+}
+
+.route-error p {
+  color: var(--color-text-secondary);
+}
+
+.route-error > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.route-error button,
+.route-error a {
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-on-accent);
+  background: var(--color-accent);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.route-error a {
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+.route-error button:focus-visible,
+.route-error a:focus-visible {
+  outline: 2px solid var(--color-cyan);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

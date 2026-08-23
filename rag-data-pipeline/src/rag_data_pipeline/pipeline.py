@@ -17,7 +17,7 @@ from rag_data_pipeline.llm_extractor import extract_all
 from rag_data_pipeline.models import Block, NormalizedDocument, Source
 from rag_data_pipeline.splitter import read_jsonl, read_jsonl_dir, write_domain_splits
 
-USER_AGENT = "InterviewLG-RAG-Pipeline/0.1 (+offline data preparation)"
+USER_AGENT = "Wenli-RAG-Pipeline/0.1 (+offline data preparation)"
 
 
 class Pipeline:

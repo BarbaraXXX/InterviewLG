@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="surface" x1="8" y1="6" x2="57" y2="60" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#102a2a" />
+      <stop offset="1" stop-color="#071521" />
+    </linearGradient>
+    <linearGradient id="trail" x1="15" y1="17" x2="51" y2="47" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4ade80" />
+      <stop offset="1" stop-color="#22d3ee" />
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#surface)" />
+  <rect x="3.25" y="3.25" width="57.5" height="57.5" rx="16.75" stroke="url(#trail)" stroke-width="2.5" />
+  <path
+    d="M17 19.5c0-3.04 2.46-5.5 5.5-5.5h19c3.04 0 5.5 2.46 5.5 5.5v15c0 3.04-2.46 5.5-5.5 5.5H32l-9 8v-8.45c-3.33-.25-6-3.03-6-6.45V19.5Z"
+    stroke="#f8fafc"
+    stroke-opacity=".7"
+    stroke-width="2.2"
+    stroke-linejoin="round"
+  />
+  <path d="M22 25h8l-3.5 4 4 4h8l4-4" stroke="url(#trail)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="22" cy="25" r="2.2" fill="#4ade80" />
+  <path d="m39.6 26.2 3.4 2.35-2.4 3.35" fill="#22d3ee" />
+</svg>

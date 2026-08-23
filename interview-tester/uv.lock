@@ -773,7 +773,7 @@ wheels = [
 
 [[package]]
 name = "interview-agent"
-version = "1.13.0"
+version = "1.14.0"
 source = { editable = "../interview-agent" }
 dependencies = [
     { name = "aiosqlite" },
@@ -832,7 +832,7 @@ dev = [
 
 [[package]]
 name = "interview-tester"
-version = "1.13.0"
+version = "1.14.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
