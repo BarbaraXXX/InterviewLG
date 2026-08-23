@@ -7,12 +7,12 @@ from langchain_core.runnables import Runnable
 
 from interview_agent.agent import build_interview_agent
 from interview_agent.db import (
+    append_message_with_next_seq,
     create_message,
     create_session,
     delete_session_for_user,
     delete_sessions_for_user,
     expire_stale_sessions,
-    get_next_message_seq,
     get_session_for_user,
     get_session_messages,
     trim_session_messages,
@@ -150,8 +150,7 @@ class SessionManager:
         return messages
 
     async def append_message(self, session_id: str, role: str, content: str) -> None:
-        seq = await get_next_message_seq(session_id)
-        await create_message(session_id, role, content, seq)
+        await append_message_with_next_seq(session_id, role, content)
         await trim_session_messages(session_id, _MAX_MESSAGES_PER_SESSION)
 
     async def end_session(self, session_id: str) -> None:

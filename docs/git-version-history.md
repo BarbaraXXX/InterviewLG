@@ -13,6 +13,49 @@
 
 暂无。
 
+## v1.12.0
+
+主题：RAG 召回正确性、面试轮次一致性与工程门禁。
+
+### RAG embedding 一致性与召回质量
+
+- 生产环境核查发现：现有 QuestionCard 索引由 `dashscope:text-embedding-v4` 生成，但运行时缺少 Embedding Provider 与 Key，查询侧回退到 deterministic 哈希向量，导致查询向量和索引向量不在同一空间。
+- QuestionCard 与 CodingProblem Store 新增 embedding readiness 检查，校验运行时 Provider、模型、维度和索引元数据；不一致时健康检查和检索接口返回 503，不再静默注入错误结果。
+- RAG query 只保留真实候选人/面试官消息，排除面试状态、阶段控制、用户记忆和滚动摘要等内部 SystemMessage。
+- 使用正确的 DashScope 查询向量对生产索引标定：Redis、Go GMP、RAG 混合检索的首条相关分分别为 0.868、0.798、0.874，库内缺少对应内容的连接池查询最高为 0.566；据此将默认 `RAG_MIN_SCORE` 调整为 0.65。
+- 部署配置增加 Embedding Provider/Key 校验；配置缺失时部署脚本提前失败，避免服务启动后才发现题库不可用。
+
+影响：
+
+- 不修改或重建现有 QuestionCard、CodingProblem SQLite 数据，只要求运行时查询配置与索引一致。
+- 缺少匹配卡片或得分低于阈值时自动回退为无 RAG 上下文的面试，不影响主对话可用性。
+- VectorDB 健康检查会读取少量索引元数据，但不会执行 embedding 请求或全量向量扫描。
+
+### 单会话轮次与消息一致性
+
+- 新增 session 级轮次协调器，同一 session 同时只能运行一个 Agent turn；来自重复标签页或并发请求的第二轮会返回 409。
+- 消息序号改为 SQLite `BEGIN IMMEDIATE` 事务内读取并写入，避免 `MAX(seq)` 与 INSERT 分属不同连接造成竞态。
+- 消息表新增 `(session_id, seq)` 唯一索引；初始化检测到历史重复时，会先按原 `seq, id` 顺序重新编号，再创建索引。
+- Agent 回复保存后同步完成本轮状态评估，再发送 SSE `done`；下一轮不再读取到上一轮尚未落库的阶段与 Topic 状态。
+- SSE 正常完成、异常或客户端中断都会释放 session turn 锁，避免会话永久处于 busy 状态。
+
+影响：
+
+- 不改变消息正文、用户账号、简历、代码提交和会话归属。
+- 状态评估发生在回复 token 输出结束与 `done` 之间，前端会等待状态落库后重新允许输入。
+- 生产核查未发现重复消息序号；迁移逻辑主要用于防止后续并发写入。
+
+### 工程检查与版本统一
+
+- `rag-data-pipeline` 新增独立 `pyproject.toml`、`uv.lock`、Ruff 和 pytest 配置，不再依赖手工 `PYTHONPATH=src` 才能测试。
+- RAG pipeline 纳入 `scripts/check.sh` 和 GitHub Actions；前端现有 Node 单元测试也纳入本地一键检查和 CI。
+- 统一 Agent、VectorDB、Tester、RAG pipeline、前端包和页面展示版本到 `v1.12.0`。
+
+影响：
+
+- 不新增生产容器和运行时依赖；RAG pipeline 仍是离线工具。
+- CI 增加 19 项 RAG pipeline 测试和 21 项前端测试，提交检查时间会小幅增加。
+
 ## v1.11.0
 
 主题：小规模内测前稳定性、版本统一与调试准备。

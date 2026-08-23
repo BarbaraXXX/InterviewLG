@@ -117,6 +117,34 @@ jobs:
           path: interview-tester/coverage.xml
           if-no-files-found: ignore
 
+  test-rag-pipeline:
+    name: rag-data-pipeline (tests + lint)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: rag-data-pipeline
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: rag-data-pipeline/uv.lock
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Lint with ruff
+        run: uv run ruff check src tests
+
+      - name: Run tests
+        run: uv run pytest tests
+
   test-web:
     name: interview-agent web (lint + build)
     runs-on: ubuntu-latest
@@ -135,6 +163,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Test
+        run: npm test
 
       - name: Lint
         run: npm run lint

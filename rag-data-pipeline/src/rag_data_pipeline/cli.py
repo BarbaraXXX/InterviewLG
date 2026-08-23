@@ -5,7 +5,6 @@ from pathlib import Path
 
 from rag_data_pipeline.pipeline import Pipeline
 
-
 DEFAULT_SOURCES = Path("config/xiaolin_sources.json")
 DEFAULT_DATA_DIR = Path("data")
 

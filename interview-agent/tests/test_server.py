@@ -1,4 +1,5 @@
 
+import asyncio
 import json
 
 import pytest
@@ -806,6 +807,26 @@ class FakeSession:
         self.username = "tester"
 
 
+def test_chat_stream_rejects_overlapping_session_turn(auth_client, monkeypatch):
+    class BusyCoordinator:
+        async def acquire(self, session_id):
+            raise server_module.SessionTurnBusyError(session_id)
+
+        def release(self, session_id):
+            raise AssertionError("busy request must not release a lock it did not acquire")
+
+    async def fake_get_user(username):
+        return {"id": 1, "username": username}
+
+    monkeypatch.setattr(server_module, "session_turn_coordinator", BusyCoordinator())
+    monkeypatch.setattr(server_module, "get_user_by_username", fake_get_user)
+
+    response = auth_client.post("/api/chat/stream", json={"session_id": "sid", "message": "并发回答"})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Another interview turn is already in progress"
+
+
 def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
     agent = FakeStreamAgent()
     fake_manager = FakeSessionManager(agent)
@@ -835,7 +856,11 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
     async def fake_advance(*args, **kwargs):
         return {}
 
+    state_updates = []
+
     async def fake_record_turn_state(*args, **kwargs):
+        await asyncio.sleep(0.01)
+        state_updates.append(kwargs)
         return {}
 
     monkeypatch.setattr(server_module, "session_manager", fake_manager)
@@ -854,6 +879,7 @@ def test_chat_stream_injects_rag_context(auth_client, monkeypatch):
     assert "真实面试题参考" in agent.last_messages[-1].content
     assert fake_manager.appended[0] == ("user", "继续问 Redis")
     assert fake_manager.appended[-1] == ("ai", "好的")
+    assert len(state_updates) == 1
 
 
 def test_chat_stream_uses_context_message_for_agent(auth_client, monkeypatch):

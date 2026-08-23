@@ -5,6 +5,7 @@ from interview_agent.config import (
     ContextSettings,
     LLMSettings,
     MCPSettings,
+    RAGSettings,
     ServerSettings,
     SpeechSettings,
     VectorDBSettings,
@@ -94,6 +95,16 @@ def test_vectordb_settings_default(monkeypatch):
     monkeypatch.delenv("VECTORDB_BASE_URL", raising=False)
     s = VectorDBSettings(_env_file=None)
     assert s.base_url == "http://localhost:9000"
+
+
+def test_rag_settings_use_conservative_relevance_threshold(monkeypatch):
+    monkeypatch.delenv("RAG_MIN_SCORE", raising=False)
+    assert RAGSettings(_env_file=None).min_score == 0.65
+
+
+def test_rag_settings_clamp_relevance_threshold(monkeypatch):
+    monkeypatch.setenv("RAG_MIN_SCORE", "2")
+    assert RAGSettings(_env_file=None).min_score == 1.0
 
 
 def test_server_settings_default(monkeypatch):

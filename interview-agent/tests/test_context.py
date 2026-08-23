@@ -90,7 +90,8 @@ async def test_build_agent_input_injects_running_summary(monkeypatch):
         return "本场面试早期对话滚动摘要：\n- 已问过 Redis", [HumanMessage(content="当前问题")]
 
     async def fake_search(query, domain):
-        assert "已问过 Redis" in query
+        assert "当前问题" in query
+        assert "已问过 Redis" not in query
         return []
 
     monkeypatch.setattr(context_module, "summarize_running_context", fake_summarize_running_context)

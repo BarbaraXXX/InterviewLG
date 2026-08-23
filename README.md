@@ -7,7 +7,7 @@
 真实大厂面经驱动 · 流式对话 · 手撕代码平台 · 多阶段状态机 · 三级记忆 · MCP 工具集成
 
 [![CI](https://github.com/BarbaraXXX/InterviewLG/actions/workflows/ci.yml/badge.svg)](https://github.com/BarbaraXXX/InterviewLG/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v1.11.0-blue)](docs/git-version-history.md)
+[![Version](https://img.shields.io/badge/version-v1.12.0-blue)](docs/git-version-history.md)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/Node.js-22.13+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -171,6 +171,8 @@ vim interview-agent/.env            # 填齐下方配置项
 | `AUTH_SECRET_KEY` | JWT 签名密钥 | `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `AUTH_INVITE_CODE` | 注册邀请码（逗号分隔多个） | 自定义 |
 | `VECTORDB_ADMIN_TOKEN` | VectorDB 写接口管理令牌 | `python3 -c "import secrets; print(secrets.token_urlsafe(32))"` |
+| `EMBEDDING_PROVIDER` | 查询向量 Provider，必须与已导入索引一致 | 生产题库使用 `dashscope` |
+| `EMBEDDING_API_KEY` | DashScope Embedding API Key | 配置具有 `text-embedding-v4` 权限的 Key |
 | `SERVER_CORS_ORIGINS` | CORS 允许的来源 | `https://你的域名` |
 | `SSL_DOMAIN` | 你的域名 | `你的域名` |
 | `SSL_EMAIL` | Let's Encrypt 通知邮箱 | `admin@你的域名` |
@@ -184,6 +186,8 @@ bash deploy.sh
 ```
 
 `deploy.sh` 自动完成：校验配置 → 创建目录 → `envsubst` 生成 nginx 配置 → 首次运行时申请 SSL 证书 → 构建 Docker 镜像 → 启动 app / vectordb / nginx / certbot 全部服务。
+
+> VectorDB 会校验运行时 embedding Provider、模型与维度是否和题库索引一致。不一致时健康检查和检索接口会返回 503，避免把错误召回结果注入面试上下文。
 
 部署完成后访问 `https://你的域名`，证书由 certbot 容器每 12 小时自动续期。
 

@@ -72,6 +72,40 @@ async def test_healthz_does_not_touch_profiles(client, monkeypatch):
     assert r.json() == {"ok": True}
 
 
+async def test_healthz_fails_when_index_embedding_model_does_not_match_runtime(client, isolate_env, monkeypatch):
+    db_path = isolate_env / "question_cards" / "mismatch.sqlite3"
+    indexed_store = QuestionCardStore(db_path, DeterministicEmbeddingProvider(64))
+    indexed_store.import_cards([
+        QuestionCard(id="redis", domain=["redis"], topic="Redis", question="Redis 为什么快？")
+    ])
+    runtime_provider = DeterministicEmbeddingProvider(64)
+    runtime_provider.provider_name = "dashscope:text-embedding-v4"
+    monkeypatch.setattr(api_module, "_question_card_store", QuestionCardStore(db_path, runtime_provider))
+
+    r = await client.get("/healthz")
+
+    assert r.status_code == 503
+    body = r.json()
+    assert body["ok"] is False
+    assert body["checks"]["question_cards"]["ready"] is False
+
+
+async def test_search_returns_503_when_index_embedding_model_does_not_match_runtime(client, isolate_env, monkeypatch):
+    db_path = isolate_env / "question_cards" / "search-mismatch.sqlite3"
+    indexed_store = QuestionCardStore(db_path, DeterministicEmbeddingProvider(64))
+    indexed_store.import_cards([
+        QuestionCard(id="redis", domain=["redis"], topic="Redis", question="Redis 为什么快？")
+    ])
+    runtime_provider = DeterministicEmbeddingProvider(64)
+    runtime_provider.provider_name = "dashscope:text-embedding-v4"
+    monkeypatch.setattr(api_module, "_question_card_store", QuestionCardStore(db_path, runtime_provider))
+
+    r = await client.post("/api/question-cards/search", json={"query": "Redis", "domain": ["redis"]})
+
+    assert r.status_code == 503
+    assert "embedding" in r.json()["detail"].lower()
+
+
 async def test_list_profiles_with_data(client, test_db):
     test_db.save_profile(InterviewProfile(company="A", position="B", source_count=3))
     r = await client.get("/api/profiles")

@@ -6,7 +6,6 @@ from html.parser import HTMLParser
 
 from rag_data_pipeline.models import Block
 
-
 SKIP_TAGS = {"script", "style", "svg", "noscript", "iframe"}
 BLOCK_TAGS = {"p", "li", "blockquote", "pre"}
 HEADING_TAGS = {f"h{i}": i for i in range(1, 7)}

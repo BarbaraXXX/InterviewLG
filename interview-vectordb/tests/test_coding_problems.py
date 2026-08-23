@@ -1,7 +1,9 @@
 import json
 
+import pytest
+
 from interview_vectordb.coding_problems import CodingProblemStore, load_coding_problems_from_path
-from interview_vectordb.embeddings import DeterministicEmbeddingProvider
+from interview_vectordb.embeddings import DeterministicEmbeddingProvider, EmbeddingCompatibilityError
 from interview_vectordb.schema import CodingProblem, CodingProblemExample
 
 
@@ -57,6 +59,21 @@ def test_search_coding_problems_filters_and_excludes(isolate_env):
 
     excluded = store.search("链表", exclude_ids=["core-problem", "acm-problem"])
     assert excluded == []
+
+
+def test_coding_problem_store_rejects_runtime_embedding_dimensions_mismatch(isolate_env):
+    db_path = isolate_env / "coding_problems" / "coding_problems.sqlite3"
+    store = CodingProblemStore(db_path, DeterministicEmbeddingProvider(64))
+    store.import_problems([_problem("reverse-list")])
+
+    mismatched_store = CodingProblemStore(db_path, DeterministicEmbeddingProvider(32))
+
+    readiness = mismatched_store.embedding_readiness()
+    assert readiness["ready"] is False
+    assert readiness["runtime_dimensions"] == 32
+    assert readiness["indexed_dimensions"] == [64]
+    with pytest.raises(EmbeddingCompatibilityError):
+        mismatched_store.search("反转链表")
 
 
 def test_coding_problem_stats(isolate_env):

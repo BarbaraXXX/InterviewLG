@@ -38,6 +38,22 @@ if [ -z "${VECTORDB_ADMIN_TOKEN:-}" ]; then
     exit 1
 fi
 
+if [ -z "${EMBEDDING_PROVIDER:-}" ]; then
+    echo "Error: EMBEDDING_PROVIDER must be set in .env and match the deployed VectorDB index"
+    exit 1
+fi
+
+case "${EMBEDDING_PROVIDER,,}" in
+    deterministic|fake|local)
+        ;;
+    *)
+        if [ -z "${EMBEDDING_API_KEY:-}" ] || [ "$EMBEDDING_API_KEY" = "your-dashscope-key" ]; then
+            echo "Error: EMBEDDING_API_KEY must be configured for provider $EMBEDDING_PROVIDER"
+            exit 1
+        fi
+        ;;
+esac
+
 NGINX_CONF="$SCRIPT_DIR/nginx/nginx.conf"
 NGINX_RESOLVED="$SCRIPT_DIR/nginx/nginx.resolved.conf"
 

@@ -232,6 +232,7 @@ async def init_db() -> None:
         await _ensure_column(db, "session_states", "current_topic", "TEXT NOT NULL DEFAULT ''")
         await _ensure_column(db, "session_states", "topic_status", "TEXT NOT NULL DEFAULT 'not_started'")
         await _ensure_column(db, "session_states", "stage_goal_status", "TEXT NOT NULL DEFAULT '{}'")
+        await _ensure_unique_message_sequences(db)
         await db.commit()
         logger.info("database initialized at %s", _DB_PATH)
     finally:
@@ -244,6 +245,28 @@ async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, defi
     if any(row["name"] == column for row in rows):
         return
     await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+async def _ensure_unique_message_sequences(db: aiosqlite.Connection) -> None:
+    async with db.execute(
+        "SELECT 1 FROM messages GROUP BY session_id, seq HAVING COUNT(*) > 1 LIMIT 1"
+    ) as cursor:
+        has_duplicates = await cursor.fetchone()
+    if has_duplicates:
+        logger.warning("duplicate message sequences detected; resequencing messages before creating unique index")
+        async with db.execute("SELECT id, session_id FROM messages ORDER BY session_id, seq, id") as cursor:
+            rows = await cursor.fetchall()
+        next_sequences: dict[str, int] = {}
+        updates = []
+        for row in rows:
+            session_id = str(row["session_id"])
+            seq = next_sequences.get(session_id, 0)
+            next_sequences[session_id] = seq + 1
+            updates.append((seq, int(row["id"])))
+        await db.executemany("UPDATE messages SET seq = ? WHERE id = ?", updates)
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unique_seq ON messages(session_id, seq)"
+    )
 
 
 # ── users ──────────────────────────────────────────────────────────
@@ -1343,6 +1366,29 @@ async def create_message(session_id: str, role: str, content: str, seq: int) -> 
             (session_id, role, content, seq),
         )
         await db.commit()
+    finally:
+        await db.close()
+
+
+async def append_message_with_next_seq(session_id: str, role: str, content: str) -> int:
+    db = await get_db()
+    try:
+        await db.execute("BEGIN IMMEDIATE")
+        async with db.execute(
+            "SELECT COALESCE(MAX(seq), -1) + 1 AS next_seq FROM messages WHERE session_id = ?",
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        next_seq = int(row["next_seq"] if row else 0)
+        await db.execute(
+            "INSERT INTO messages (session_id, role, content, seq) VALUES (?, ?, ?, ?)",
+            (session_id, role, content, next_seq),
+        )
+        await db.commit()
+        return next_seq
+    except Exception:
+        await db.rollback()
+        raise
     finally:
         await db.close()
 

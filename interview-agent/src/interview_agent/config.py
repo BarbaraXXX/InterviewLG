@@ -126,7 +126,7 @@ class RAGSettings(BaseSettings):
 
     enabled: bool = True
     top_k: int = 3
-    min_score: float = 0.0
+    min_score: float = 0.65
     timeout_seconds: float = 3.0
     max_context_chars: int = 1800
 
@@ -134,6 +134,11 @@ class RAGSettings(BaseSettings):
     @classmethod
     def _validate_top_k(cls, value: int) -> int:
         return min(max(value, 1), 10)
+
+    @field_validator("min_score")
+    @classmethod
+    def _validate_min_score(cls, value: float) -> float:
+        return min(max(value, -1.0), 1.0)
 
     @field_validator("timeout_seconds")
     @classmethod

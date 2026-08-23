@@ -22,6 +22,9 @@ run_python_checks() {
 }
 
 run_web_checks() {
+  echo "==> interview-agent/web: test"
+  (cd "${ROOT_DIR}/interview-agent/web" && npm test)
+
   echo "==> interview-agent/web: lint"
   (cd "${ROOT_DIR}/interview-agent/web" && npm run lint)
 
@@ -37,6 +40,7 @@ run_web_checks() {
 run_python_checks "interview-agent"
 run_python_checks "interview-vectordb"
 run_python_checks "interview-tester"
+run_python_checks "rag-data-pipeline"
 run_web_checks
 
 echo "All checks passed."

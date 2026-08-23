@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 import httpx
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from interview_agent.config import rag_settings, vectordb_settings
 
@@ -31,11 +31,17 @@ def domain_filter(domain: str) -> list[str]:
 
 
 def build_rag_query(domain: str, difficulty: str, user_message: str, messages: list[BaseMessage]) -> str:
+    conversation = [message for message in messages if isinstance(message, (HumanMessage, AIMessage))]
+    if conversation and isinstance(conversation[-1], HumanMessage):
+        content = conversation[-1].content if isinstance(conversation[-1].content, str) else ""
+        if content.strip() == user_message.strip():
+            conversation = conversation[:-1]
     recent_parts: list[str] = []
-    for message in messages[-4:]:
+    for message in conversation[-4:]:
         content = message.content if isinstance(message.content, str) else ""
         if content:
-            recent_parts.append(content[:500])
+            role = "候选人" if isinstance(message, HumanMessage) else "面试官"
+            recent_parts.append(f"{role}：{content[:500]}")
     parts = [
         f"面试方向：{domain}",
         f"目标岗位：{difficulty}",
