@@ -9,7 +9,6 @@ from rag_data_pipeline.env import DeepSeekSettings
 from rag_data_pipeline.extractor import is_structural_topic
 from rag_data_pipeline.splitter import read_jsonl_dir
 
-
 ALLOWED_DIFFICULTIES = {"", "junior", "mid", "senior"}
 
 

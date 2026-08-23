@@ -5,7 +5,6 @@ import re
 
 from rag_data_pipeline.models import Block, ExtractedCard, NormalizedDocument
 
-
 QUESTION_PATTERNS = [
     r"[?？]$",
     r"^(Q|q|问|问题|面试题)[:：]",

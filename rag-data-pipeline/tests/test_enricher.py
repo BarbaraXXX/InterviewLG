@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import unittest
 import json
 import tempfile
+import unittest
 from pathlib import Path
 
 from rag_data_pipeline.enricher import enrich_all, normalize_llm_card, parse_json_content

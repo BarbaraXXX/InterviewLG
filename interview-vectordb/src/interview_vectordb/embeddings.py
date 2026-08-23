@@ -17,6 +17,45 @@ class EmbeddingProvider(Protocol):
         ...
 
 
+class EmbeddingCompatibilityError(RuntimeError):
+    """Raised when runtime query embeddings do not match persisted index embeddings."""
+
+
+def build_embedding_readiness(
+    provider: EmbeddingProvider,
+    indexed_metadata: list[tuple[str, int, int]],
+) -> dict:
+    indexed_models = sorted({model for model, _, _ in indexed_metadata if model})
+    indexed_dimensions = sorted({int(dimensions) for _, dimensions, _ in indexed_metadata})
+    indexed_count = sum(int(count) for _, _, count in indexed_metadata)
+    runtime_model = provider.provider_name
+    runtime_dimensions = provider.dimensions
+    ready = indexed_count == 0 or (
+        indexed_models == [runtime_model] and indexed_dimensions == [runtime_dimensions]
+    )
+    reason = ""
+    if not ready:
+        reason = (
+            "Embedding index is incompatible with the runtime provider: "
+            f"runtime={runtime_model}/{runtime_dimensions}, "
+            f"indexed={indexed_models}/{indexed_dimensions}."
+        )
+    return {
+        "ready": ready,
+        "runtime_model": runtime_model,
+        "runtime_dimensions": runtime_dimensions,
+        "indexed_models": indexed_models,
+        "indexed_dimensions": indexed_dimensions,
+        "indexed_count": indexed_count,
+        "reason": reason,
+    }
+
+
+def require_embedding_compatibility(readiness: dict) -> None:
+    if not readiness.get("ready"):
+        raise EmbeddingCompatibilityError(str(readiness.get("reason") or "Embedding index is incompatible"))
+
+
 class DeterministicEmbeddingProvider:
     def __init__(self, dimensions: int = 64) -> None:
         self.dimensions = dimensions

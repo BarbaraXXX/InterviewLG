@@ -6,7 +6,12 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from interview_vectordb.embeddings import EmbeddingProvider, cosine_similarity
+from interview_vectordb.embeddings import (
+    EmbeddingProvider,
+    build_embedding_readiness,
+    cosine_similarity,
+    require_embedding_compatibility,
+)
 from interview_vectordb.schema import CodingProblem
 
 logger = logging.getLogger(__name__)
@@ -124,6 +129,18 @@ class CodingProblemStore:
                     _increment(stats["topics"], topic)
         return stats
 
+    def embedding_readiness(self) -> dict:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT embedding_model, embedding_dimensions, COUNT(*) AS count "
+                "FROM coding_problems GROUP BY embedding_model, embedding_dimensions"
+            ).fetchall()
+        metadata = [
+            (str(row["embedding_model"]), int(row["embedding_dimensions"]), int(row["count"]))
+            for row in rows
+        ]
+        return build_embedding_readiness(self.embedding_provider, metadata)
+
     def search(
         self,
         query: str,
@@ -136,6 +153,7 @@ class CodingProblemStore:
         top_k: int = 5,
         min_score: float = 0.0,
     ) -> list[dict]:
+        require_embedding_compatibility(self.embedding_readiness())
         query_text = query.strip() or "经典手撕算法题"
         query_vector = self.embedding_provider.embed_texts([query_text])[0]
         difficulty_filter = _clean_filter(difficulty)

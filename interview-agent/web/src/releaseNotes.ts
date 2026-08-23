@@ -10,6 +10,26 @@ export interface ReleaseNote {
 
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    date: '2026-08-23',
+    title: 'RAG 召回与会话一致性修复',
+    items: [
+      '修复生产题库索引与运行时查询向量 Provider 不一致时仍继续检索的问题；模型或维度不匹配时现在会停止召回并报告健康异常。',
+      'RAG 查询只使用真实面试对话，不再把内部状态、流程控制和记忆提示混入检索请求。',
+      '根据线上相关性标定增加 0.65 召回阈值，低相关题卡不再注入面试上下文。',
+      '同一面试会话的生成轮次改为串行处理，消息序号原子分配，状态更新完成后才允许进入下一轮。',
+      'RAG 离线数据管道和前端单元测试正式接入一键检查与 CI。',
+    ],
+    sections: [
+      {
+        title: '部署提示',
+        items: [
+          '生产环境必须配置与题库索引一致的 EMBEDDING_PROVIDER、EMBEDDING_MODEL、EMBEDDING_DIMENSIONS 和 EMBEDDING_API_KEY。',
+          '本次会为消息表增加 sessionId + seq 唯一索引；如检测到历史重复序号，会先按原消息顺序自动重排。',
+        ],
+      },
+    ],
+  },
+  {
     date: '2026-07-06',
     title: '内测稳定性与调试准备',
     items: [

@@ -1,22 +1,21 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import re
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.request import Request, urlopen
 from urllib.parse import urljoin, urlparse
+from urllib.request import Request, urlopen
 
 from rag_data_pipeline.chunker import chunk_document, write_chunks
-from rag_data_pipeline.html_blocks import parse_html_blocks
-from rag_data_pipeline.models import Block, NormalizedDocument, Source
 from rag_data_pipeline.enricher import DeepSeekClient, enrich_all
 from rag_data_pipeline.env import load_deepseek_settings
+from rag_data_pipeline.html_blocks import parse_html_blocks
 from rag_data_pipeline.llm_extractor import extract_all
+from rag_data_pipeline.models import Block, NormalizedDocument, Source
 from rag_data_pipeline.splitter import read_jsonl, read_jsonl_dir, write_domain_splits
-
 
 USER_AGENT = "InterviewLG-RAG-Pipeline/0.1 (+offline data preparation)"
 

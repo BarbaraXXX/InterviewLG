@@ -4,11 +4,12 @@ import re
 
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from interview_vectordb.coding_problems import CodingProblemStore
 from interview_vectordb.config import embedding_settings, security_settings
 from interview_vectordb.db import _CODING_PROBLEMS_DB_PATH, _EXPERIENCES_DIR, _QUESTION_CARDS_DB_PATH, ProfileDB
-from interview_vectordb.embeddings import build_embedding_provider
+from interview_vectordb.embeddings import EmbeddingCompatibilityError, build_embedding_provider
 from interview_vectordb.question_cards import QuestionCardStore
 from interview_vectordb.schema import CodingProblemSearchRequest, InterviewExperience, QuestionCardSearchRequest
 
@@ -49,7 +50,13 @@ async def require_admin_token(x_admin_token: str = Header(default="")) -> None:
 
 
 @api_app.get("/healthz")
-async def healthz() -> dict:
+async def healthz():
+    checks = {
+        "question_cards": _question_card_store.embedding_readiness(),
+        "coding_problems": _coding_problem_store.embedding_readiness(),
+    }
+    if not all(check["ready"] for check in checks.values()):
+        return JSONResponse(status_code=503, content={"ok": False, "checks": checks})
     return {"ok": True}
 
 
@@ -139,12 +146,16 @@ async def search_question_cards(request: QuestionCardSearchRequest) -> dict:
         request.top_k,
         len(request.query),
     )
-    cards = _question_card_store.search(
-        request.query,
-        domain=request.domain,
-        top_k=request.top_k,
-        min_score=request.min_score,
-    )
+    try:
+        cards = _question_card_store.search(
+            request.query,
+            domain=request.domain,
+            top_k=request.top_k,
+            min_score=request.min_score,
+        )
+    except EmbeddingCompatibilityError as exc:
+        logger.error("question card search blocked: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"cards": cards}
 
 
@@ -167,16 +178,20 @@ async def search_coding_problems(request: CodingProblemSearchRequest) -> dict:
         request.top_k,
         len(request.query),
     )
-    problems = _coding_problem_store.search(
-        request.query,
-        difficulty=request.difficulty,
-        importance=request.importance,
-        answer_mode=request.answer_mode,
-        topics=request.topics,
-        exclude_ids=request.exclude_ids,
-        top_k=request.top_k,
-        min_score=request.min_score,
-    )
+    try:
+        problems = _coding_problem_store.search(
+            request.query,
+            difficulty=request.difficulty,
+            importance=request.importance,
+            answer_mode=request.answer_mode,
+            topics=request.topics,
+            exclude_ids=request.exclude_ids,
+            top_k=request.top_k,
+            min_score=request.min_score,
+        )
+    except EmbeddingCompatibilityError as exc:
+        logger.error("coding problem search blocked: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"problems": problems}
 
 

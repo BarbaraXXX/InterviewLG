@@ -1,6 +1,8 @@
 import json
 
-from interview_vectordb.embeddings import DeterministicEmbeddingProvider
+import pytest
+
+from interview_vectordb.embeddings import DeterministicEmbeddingProvider, EmbeddingCompatibilityError
 from interview_vectordb.question_cards import QuestionCardStore, build_search_text, load_question_cards_from_path
 from interview_vectordb.schema import QuestionCard
 
@@ -41,6 +43,24 @@ def test_question_card_store_import_and_search(tmp_path):
     assert store.domain_counts()["redis"] == 1
     assert len(results) == 1
     assert results[0]["id"] == "redis"
+
+
+def test_question_card_store_rejects_runtime_embedding_model_mismatch(tmp_path):
+    db_path = tmp_path / "cards.sqlite3"
+    indexed_provider = DeterministicEmbeddingProvider(dimensions=64)
+    store = QuestionCardStore(db_path, indexed_provider)
+    store.import_cards([sample_card("redis", ["backend", "redis"], "Redis", "Redis 为什么快？")])
+
+    runtime_provider = DeterministicEmbeddingProvider(dimensions=64)
+    runtime_provider.provider_name = "dashscope:text-embedding-v4"
+    mismatched_store = QuestionCardStore(db_path, runtime_provider)
+
+    readiness = mismatched_store.embedding_readiness()
+    assert readiness["ready"] is False
+    assert readiness["runtime_model"] == "dashscope:text-embedding-v4"
+    assert readiness["indexed_models"] == ["deterministic"]
+    with pytest.raises(EmbeddingCompatibilityError):
+        mismatched_store.search("Redis")
 
 
 def sample_card(card_id: str, domain: list[str], topic: str, question: str) -> QuestionCard:

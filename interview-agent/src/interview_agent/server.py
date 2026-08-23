@@ -67,6 +67,7 @@ from interview_agent.prompts import PRESET_DOMAINS, build_system_prompt
 from interview_agent.session import session_manager
 from interview_agent.speech import SpeechNotConfiguredError, SpeechTranscriptionError, get_speech_transcriber
 from interview_agent.state_updater import record_turn_state
+from interview_agent.turn_coordinator import SessionTurnBusyError, session_turn_coordinator
 
 logger = logging.getLogger(__name__)
 
@@ -1120,85 +1121,94 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
 
     user = await _get_current_user_row(username)
 
-    rationale_debug_enabled = bool(question_rationale_settings.enabled and req.debug_rationale)
-    ses = await session_manager.get_or_rebuild_agent(
-        req.session_id,
-        username,
-        user["id"],
-        question_rationale_enabled=rationale_debug_enabled,
-    )
-    if ses is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    session_row = await get_session_for_user(req.session_id, user["id"])
-    if session_row is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    try:
+        await session_turn_coordinator.acquire(req.session_id)
+    except SessionTurnBusyError as exc:
+        raise HTTPException(status_code=409, detail="Another interview turn is already in progress") from exc
 
-    logger.info(
-        "chat_stream start user=%s session=%s msg_len=%d rationale_debug=%s",
-        username,
-        req.session_id,
-        len(req.message),
-        rationale_debug_enabled,
-    )
-
-    async def load_current_user_memory_context(_session_id: str) -> str:
-        return await load_user_memory_context(user["id"])
-
-    display_message = req.message.strip()
-    context_message = req.context_message.strip()
-    await session_manager.append_message(req.session_id, "user", display_message)
-    await _increment_usage_safely("chat_turn")
-    active_coding_task = await get_active_coding_task(req.session_id)
-    await advance_session_state(
-        req.session_id,
-        ses.difficulty,
-        has_active_coding_task=active_coding_task is not None,
-        is_coding_submission=bool(context_message),
-    )
-    agent_input = await build_agent_input(
-        session_id=req.session_id,
-        domain=ses.domain,
-        difficulty=ses.difficulty,
-        display_message=display_message,
-        context_message=context_message,
-        load_messages=session_manager.load_messages,
-        load_state=get_session_state,
-        load_user_memory_context=load_current_user_memory_context,
-        load_memory_context=load_memory_context,
-    )
-    if agent_input.rag_context:
-        logger.info(
-            "rag context injected session=%s cards=%d chars=%d",
+    try:
+        rationale_debug_enabled = bool(question_rationale_settings.enabled and req.debug_rationale)
+        ses = await session_manager.get_or_rebuild_agent(
             req.session_id,
-            len(agent_input.rag_cards),
-            len(agent_input.rag_context),
+            username,
+            user["id"],
+            question_rationale_enabled=rationale_debug_enabled,
         )
-    usage = build_context_usage(
-        system_prompt=build_system_prompt(
-            session_row["domain"],
-            session_row["difficulty"],
-            session_row.get("structured_jd", ""),
-            session_row.get("structured_profile", ""),
-            include_question_rationale=rationale_debug_enabled,
-        ),
-        messages=agent_input.messages,
-        running_summary_context=agent_input.running_summary_context,
-        state_context=agent_input.state_context,
-        user_memory_context=agent_input.user_memory_context,
-        session_memory_context=agent_input.memory_context,
-        stage_control_context=agent_input.stage_control_context,
-        rag_context=agent_input.rag_context,
-    )
-    logger.info(
-        "context usage session=%s total_tokens=%d budget=%d ratio=%.2f status=%s sections=%s",
-        req.session_id,
-        usage["total_tokens"],
-        usage["input_budget_tokens"],
-        usage["ratio"],
-        usage["status"],
-        compact_usage_for_log(usage),
-    )
-    _CONTEXT_USAGE_CACHE[req.session_id] = usage
+        if ses is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session_row = await get_session_for_user(req.session_id, user["id"])
+        if session_row is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        logger.info(
+            "chat_stream start user=%s session=%s msg_len=%d rationale_debug=%s",
+            username,
+            req.session_id,
+            len(req.message),
+            rationale_debug_enabled,
+        )
+
+        async def load_current_user_memory_context(_session_id: str) -> str:
+            return await load_user_memory_context(user["id"])
+
+        display_message = req.message.strip()
+        context_message = req.context_message.strip()
+        await session_manager.append_message(req.session_id, "user", display_message)
+        await _increment_usage_safely("chat_turn")
+        active_coding_task = await get_active_coding_task(req.session_id)
+        await advance_session_state(
+            req.session_id,
+            ses.difficulty,
+            has_active_coding_task=active_coding_task is not None,
+            is_coding_submission=bool(context_message),
+        )
+        agent_input = await build_agent_input(
+            session_id=req.session_id,
+            domain=ses.domain,
+            difficulty=ses.difficulty,
+            display_message=display_message,
+            context_message=context_message,
+            load_messages=session_manager.load_messages,
+            load_state=get_session_state,
+            load_user_memory_context=load_current_user_memory_context,
+            load_memory_context=load_memory_context,
+        )
+        if agent_input.rag_context:
+            logger.info(
+                "rag context injected session=%s cards=%d chars=%d",
+                req.session_id,
+                len(agent_input.rag_cards),
+                len(agent_input.rag_context),
+            )
+        usage = build_context_usage(
+            system_prompt=build_system_prompt(
+                session_row["domain"],
+                session_row["difficulty"],
+                session_row.get("structured_jd", ""),
+                session_row.get("structured_profile", ""),
+                include_question_rationale=rationale_debug_enabled,
+            ),
+            messages=agent_input.messages,
+            running_summary_context=agent_input.running_summary_context,
+            state_context=agent_input.state_context,
+            user_memory_context=agent_input.user_memory_context,
+            session_memory_context=agent_input.memory_context,
+            stage_control_context=agent_input.stage_control_context,
+            rag_context=agent_input.rag_context,
+        )
+        logger.info(
+            "context usage session=%s total_tokens=%d budget=%d ratio=%.2f status=%s sections=%s",
+            req.session_id,
+            usage["total_tokens"],
+            usage["input_budget_tokens"],
+            usage["ratio"],
+            usage["status"],
+            compact_usage_for_log(usage),
+        )
+        _CONTEXT_USAGE_CACHE[req.session_id] = usage
+    except Exception:
+        session_turn_coordinator.release(req.session_id)
+        raise
 
     async def record_interview_state_safely(user_message: str, agent_reply: str) -> None:
         try:
@@ -1211,49 +1221,52 @@ async def chat_stream(req: ChatRequest, username: str = Depends(get_current_user
             logger.warning("interview state update failed session=%s", req.session_id, exc_info=True)
 
     async def event_generator():
-        full_content = ""
-        rationale_sent = False
-        async for event in ses.agent.astream_events(
-            {"agent_input": agent_input, "messages": agent_input.messages},
-            version="v2",
-        ):
-            kind = event.get("event")
-            if kind == "on_chat_model_stream":
-                chunk = event["data"]["chunk"]
-                if hasattr(chunk, "content") and chunk.content:
-                    text = chunk.content if isinstance(chunk.content, str) else ""
-                    if text:
-                        full_content += text
-                        yield f"data: {json.dumps({'type': 'token', 'content': text}, ensure_ascii=False)}\n\n"
-            elif kind == "on_tool_start":
-                tool_name = event.get("name", "unknown")
-                if rationale_debug_enabled:
-                    logger.info(
-                        "question rationale debug tool_start session=%s tool=%s",
-                        req.session_id,
-                        tool_name,
-                    )
-                if tool_name == "emit_question_rationale" and rationale_debug_enabled:
-                    rationale = _clean_rationale_event(_extract_rationale_tool_input(event.get("data")))
-                    if rationale:
-                        rationale_sent = True
-                        yield (
-                            f"data: {json.dumps({'type': 'question_rationale', 'content': rationale}, ensure_ascii=False)}\n\n"
+        try:
+            full_content = ""
+            rationale_sent = False
+            async for event in ses.agent.astream_events(
+                {"agent_input": agent_input, "messages": agent_input.messages},
+                version="v2",
+            ):
+                kind = event.get("event")
+                if kind == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    if hasattr(chunk, "content") and chunk.content:
+                        text = chunk.content if isinstance(chunk.content, str) else ""
+                        if text:
+                            full_content += text
+                            yield f"data: {json.dumps({'type': 'token', 'content': text}, ensure_ascii=False)}\n\n"
+                elif kind == "on_tool_start":
+                    tool_name = event.get("name", "unknown")
+                    if rationale_debug_enabled:
+                        logger.info(
+                            "question rationale debug tool_start session=%s tool=%s",
+                            req.session_id,
+                            tool_name,
                         )
-                yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name}, ensure_ascii=False)}\n\n"
-            elif kind == "on_tool_end":
-                yield f"data: {json.dumps({'type': 'tool_end'}, ensure_ascii=False)}\n\n"
+                    if tool_name == "emit_question_rationale" and rationale_debug_enabled:
+                        rationale = _clean_rationale_event(_extract_rationale_tool_input(event.get("data")))
+                        if rationale:
+                            rationale_sent = True
+                            yield (
+                                f"data: {json.dumps({'type': 'question_rationale', 'content': rationale}, ensure_ascii=False)}\n\n"
+                            )
+                    yield f"data: {json.dumps({'type': 'tool_start', 'tool': tool_name}, ensure_ascii=False)}\n\n"
+                elif kind == "on_tool_end":
+                    yield f"data: {json.dumps({'type': 'tool_end'}, ensure_ascii=False)}\n\n"
 
-        if full_content:
-            await session_manager.append_message(req.session_id, "ai", full_content)
-            asyncio.create_task(record_interview_state_safely(context_message or display_message, full_content))
-        if rationale_debug_enabled and not rationale_sent:
-            logger.info("question rationale missing session=%s", req.session_id)
-            yield (
-                f"data: {json.dumps({'type': 'question_rationale', 'content': _missing_rationale_debug_event()}, ensure_ascii=False)}\n\n"
-            )
-        logger.info("chat_stream end user=%s session=%s reply_len=%d", username, req.session_id, len(full_content))
-        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+            if full_content:
+                await session_manager.append_message(req.session_id, "ai", full_content)
+                await record_interview_state_safely(context_message or display_message, full_content)
+            if rationale_debug_enabled and not rationale_sent:
+                logger.info("question rationale missing session=%s", req.session_id)
+                yield (
+                    f"data: {json.dumps({'type': 'question_rationale', 'content': _missing_rationale_debug_event()}, ensure_ascii=False)}\n\n"
+                )
+            logger.info("chat_stream end user=%s session=%s reply_len=%d", username, req.session_id, len(full_content))
+            yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+        finally:
+            session_turn_coordinator.release(req.session_id)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream")
 

@@ -1,3 +1,4 @@
+import asyncio
 from unittest.mock import MagicMock
 
 import pytest
@@ -194,6 +195,43 @@ async def test_append_message_uses_monotonic_seq_after_trim(mock_agent_build, is
     assert rows[0]["content"] == "m5"
     assert rows[-1]["seq"] == 205
     assert await get_next_message_seq(sid) == 206
+
+
+async def test_append_message_assigns_unique_sequence_under_concurrency(mock_agent_build, isolate_env):
+    await init_db()
+    user_id = await _make_user("alice")
+    mgr = SessionManager()
+    sid = await mgr.create("backend", "campus_fulltime", "alice", user_id)
+
+    await asyncio.gather(*(mgr.append_message(sid, "user", f"m{i}") for i in range(20)))
+
+    rows = await get_session_messages(sid, 100)
+    sequences = [row["seq"] for row in rows]
+    assert sequences == list(range(21))
+    assert len(sequences) == len(set(sequences))
+
+
+async def test_init_db_repairs_legacy_duplicate_message_sequences(mock_agent_build, isolate_env):
+    await init_db()
+    user_id = await _make_user("alice")
+    mgr = SessionManager()
+    sid = await mgr.create("backend", "campus_fulltime", "alice", user_id)
+    db = await get_db()
+    try:
+        await db.execute("DROP INDEX idx_messages_unique_seq")
+        await db.execute(
+            "INSERT INTO messages (session_id, role, content, seq) VALUES (?, 'user', '重复序号消息', 0)",
+            (sid,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+    await init_db()
+
+    rows = await get_session_messages(sid)
+    assert [row["seq"] for row in rows] == [0, 1]
+    assert [row["content"] for row in rows] == [OPENING_MESSAGE, "重复序号消息"]
 
 
 async def test_expire_stale_sessions_keeps_history(isolate_env):
