@@ -1,0 +1,74 @@
+.root {
+  --brand-symbol-size: 38px;
+  --brand-name-size: 1.25rem;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--color-text, #f8fafc);
+  line-height: 1;
+}
+
+.symbol {
+  width: var(--brand-symbol-size);
+  height: var(--brand-symbol-size);
+  flex: 0 0 auto;
+  overflow: visible;
+  filter: drop-shadow(0 9px 18px rgba(6, 95, 70, 0.2));
+}
+
+.wordmarkText {
+  min-width: 0;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.22rem;
+}
+
+.wordmarkText strong,
+.wordmarkText small {
+  display: block;
+  white-space: nowrap;
+}
+
+.wordmarkText strong {
+  color: inherit;
+  font-size: var(--brand-name-size);
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.wordmarkText small {
+  color: var(--color-text-tertiary, #7c8aa3);
+  font-size: max(0.625rem, calc(var(--brand-name-size) * 0.4));
+  font-weight: 750;
+  letter-spacing: 0.16em;
+}
+
+.compact {
+  gap: 0;
+}
+
+.withWordmark {
+  min-width: max-content;
+}
+
+.sm {
+  --brand-symbol-size: 30px;
+  --brand-name-size: 1rem;
+}
+
+.md {
+  --brand-symbol-size: 38px;
+  --brand-name-size: 1.25rem;
+}
+
+.lg {
+  --brand-symbol-size: 48px;
+  --brand-name-size: 1.625rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .symbol {
+    filter: none;
+  }
+}

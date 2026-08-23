@@ -11,7 +11,9 @@ import {
   fetchResumes,
   getAdminMe,
   getMe,
+  logout,
   pauseInterviewSession,
+  resetUserScopedApiState,
   sendPresenceHeartbeat,
   streamChat,
 } from './api.ts';
@@ -187,6 +189,17 @@ test('does not treat rate-limited auth check as logged out', async () => {
       () => getMe(),
       /Auth check failed/,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('does not report logout success when the server fails to clear the session', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response('Service Unavailable', { status: 503 })) as typeof fetch;
+
+  try {
+    await assert.rejects(() => logout(), /Logout failed: 503/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -384,6 +397,82 @@ test('coalesces common setup resource requests', async () => {
     assert.equal(requestUrls.filter((url) => url.endsWith('/profiles')).length, 1);
     assert.equal(requestUrls.filter((url) => url.endsWith('/resumes')).length, 1);
   } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('keeps user-scoped resume caches isolated across authentication epochs', async () => {
+  const originalFetch = globalThis.fetch;
+  const resolveResponses: Array<(value: Response) => void> = [];
+  let fetchCount = 0;
+  resetUserScopedApiState();
+
+  globalThis.fetch = (() => {
+    fetchCount += 1;
+    return new Promise<Response>((resolve) => {
+      resolveResponses.push(resolve);
+    });
+  }) as typeof fetch;
+
+  try {
+    const firstUserRequest = fetchResumes();
+    resetUserScopedApiState();
+    const secondUserRequest = fetchResumes();
+
+    assert.equal(fetchCount, 2);
+    resolveResponses[1](new Response(JSON.stringify({ resumes: [{ id: 2, title: 'B' }] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    assert.equal((await secondUserRequest)[0].id, 2);
+
+    resolveResponses[0](new Response(JSON.stringify({ resumes: [{ id: 1, title: 'A' }] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    assert.equal((await firstUserRequest)[0].id, 1);
+
+    const currentUserCachedResult = await fetchResumes();
+    assert.equal(currentUserCachedResult[0].id, 2);
+    assert.equal(fetchCount, 2);
+  } finally {
+    resetUserScopedApiState();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('does not reuse an in-flight session list request after the authenticated user changes', async () => {
+  const originalFetch = globalThis.fetch;
+  const resolveResponses: Array<(value: Response) => void> = [];
+  let fetchCount = 0;
+  resetUserScopedApiState();
+
+  globalThis.fetch = (() => {
+    fetchCount += 1;
+    return new Promise<Response>((resolve) => {
+      resolveResponses.push(resolve);
+    });
+  }) as typeof fetch;
+
+  try {
+    const firstUserRequest = fetchInterviewSessions(100);
+    resetUserScopedApiState();
+    const secondUserRequest = fetchInterviewSessions(100);
+
+    assert.equal(fetchCount, 2);
+    resolveResponses[1](new Response(JSON.stringify({ sessions: [{ id: 'session-b' }] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    resolveResponses[0](new Response(JSON.stringify({ sessions: [{ id: 'session-a' }] }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    assert.equal((await secondUserRequest)[0].id, 'session-b');
+    assert.equal((await firstUserRequest)[0].id, 'session-a');
+  } finally {
+    resetUserScopedApiState();
     globalThis.fetch = originalFetch;
   }
 });

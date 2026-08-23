@@ -1,3 +1,3 @@
-"""Interview Agent - Mock technical interview agent built with LangGraph and MCP client."""
+"""Wenli Interview Agent - Mock technical interview training built with LangGraph."""
 
-__version__ = "1.13.0"
+__version__ = "1.14.0"

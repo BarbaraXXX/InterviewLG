@@ -1,14 +1,18 @@
 # interview-agent
 
-LangGraph 面试 Agent，支持 JD 注入、面经偏好注入、JWT 认证、SSE 流式输出。
+问砺的 LangGraph 面试 Agent 主服务，支持 JD 注入、面经偏好注入、JWT 认证、SSE 流式输出。
 
 ## 架构
 
 ```
 web/src/                          # React 前端
-  App.tsx                           LoginView / SetupView / ChatView
+  App.tsx                           公开首页 / 业务应用路由与懒加载边界
+  app/Application.tsx               登录 / 工作台 / 配置 / 对话 / 历史 / 管理后台
+  pages/landing/                    问砺公开产品首页与独立样式
+  components/brand|theme/           品牌标志与主题组件
+  styles/base.css                   公开页和业务页共享视觉变量
   api.ts                            API 调用 + SSE 流
-  index.css                         暗色主题样式
+  index.css                         业务应用样式
 
 src/interview_agent/
   server.py       FastAPI 入口      路由、认证、SSE、vectordb 代理

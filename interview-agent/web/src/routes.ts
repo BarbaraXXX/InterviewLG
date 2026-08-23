@@ -43,7 +43,6 @@ export const ADMIN_ROUTE_ENTRIES = [
 ] as const satisfies ReadonlyArray<{ path: string }>;
 
 const USER_ROUTE_VIEWS = new Map<string, MobileNavigationView>([
-  [ROUTES.root, 'dashboard'],
   [ROUTES.login, 'login'],
   [ROUTES.dashboard, 'dashboard'],
   [ROUTES.setup, 'setup'],
@@ -64,6 +63,36 @@ export function routeToUserView(pathname: string): MobileNavigationView | null {
   return null;
 }
 
+export function isPublicUserRoute(pathname: string): boolean {
+  return pathname === ROUTES.root || pathname === ROUTES.login;
+}
+
+export function isProtectedUserRoute(pathname: string): boolean {
+  const view = routeToUserView(pathname);
+  return view !== null && view !== 'login';
+}
+
+export function resolveLoginNextPath(candidate: string | null | undefined): string {
+  if (!candidate || !candidate.startsWith('/') || candidate.startsWith('//')) {
+    return ROUTES.dashboard;
+  }
+
+  try {
+    const baseUrl = new URL('https://app.local');
+    const candidateUrl = new URL(candidate, baseUrl);
+    if (candidateUrl.origin !== baseUrl.origin || !isProtectedUserRoute(candidateUrl.pathname)) {
+      return ROUTES.dashboard;
+    }
+    return `${candidateUrl.pathname}${candidateUrl.search}${candidateUrl.hash}`;
+  } catch {
+    return ROUTES.dashboard;
+  }
+}
+
+export function createLoginRoute(candidate: string | null | undefined): string {
+  return `${ROUTES.login}?next=${encodeURIComponent(resolveLoginNextPath(candidate))}`;
+}
+
 export function resolveAuthenticatedUserView(
   pathname: string,
   fallbackView: MobileNavigationView,
@@ -81,5 +110,9 @@ export function getRouteSessionId(pathname: string, resource: 'interview' | 'his
   if (!pathname.startsWith(prefix)) return null;
   const sessionId = pathname.slice(prefix.length);
   if (!sessionId || sessionId.includes('/')) return null;
-  return decodeURIComponent(sessionId);
+  try {
+    return decodeURIComponent(sessionId);
+  } catch {
+    return null;
+  }
 }

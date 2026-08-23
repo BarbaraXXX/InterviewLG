@@ -1,13 +1,13 @@
 <div align="center">
 
-# InterviewLG
+# 问砺
 
-**基于 LangGraph 的对话式 AI 模拟技术面试系统**
+**AI 技术面试训练**
 
-真实大厂面经驱动 · 流式对话 · 手撕代码平台 · 多阶段状态机 · 三级记忆 · MCP 工具集成
+连续追问 · 可控问题预算 · 手撕代码 · 完整过程回看
 
 [![CI](https://github.com/BarbaraXXX/InterviewLG/actions/workflows/ci.yml/badge.svg)](https://github.com/BarbaraXXX/InterviewLG/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v1.13.0-blue)](docs/git-version-history.md)
+[![Version](https://img.shields.io/badge/version-v1.14.0-blue)](docs/git-version-history.md)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/Node.js-22.13+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -18,14 +18,14 @@
 
 ## 简介
 
-InterviewLG 是一个面向求职者与面试官训练场景的端到端面试模拟系统。它不是简单的"刷题机器人"，而是一个由 LangGraph 驱动的对话式 Agent——会根据你的回答追问深挖、按阶段推进面试流程、在你答得浅时主动追问、在合适时机出手撕代码题，并基于真实大厂面经聚合的偏好画像让提问更贴近真实场景。
+问砺是一个面向校招技术岗位求职者的模拟面试训练系统。它通过连续对话模拟技术面试中的思考与表达过程，会沿着项目经历、技术选择和每一次回答继续追问，帮助使用者把掌握的知识逐渐练成能够讲清原理、说明取舍、应对深入追问的表达能力。
 
-### 为什么选择 InterviewLG
+### 为什么选择问砺
 
 - **真实对话式面试**：不是单轮问答，是多轮深度对话。Agent 会根据你的回答质量调整追问深度，回答浅了就追问，答得好就推进到下一话题。
-- **面经偏好注入**：基于真实大厂面经（华为、字节等）LLM 聚合的偏好 Profile，让面试问题贴近真实场景，而不是泛泛而谈。
-- **手撕代码平台**：内置 Hot100 算法题库，面试中实时出题、在线写代码、支持 Python / Java / C++ / JavaScript / TypeScript 等多语言。
-- **8 大技术方向**：后端、前端、全栈、算法、嵌入式、DevOps、数据、安全，覆盖主流求职场景。
+- **相关问题参考**：在题库存在足够相关内容时，通过语义检索为当前问题提供参考；召回不足时自动降级，不强行注入低相关题目。
+- **手撕代码平台**：标准与深入档包含代码题，支持 Python / Java / C++ / JavaScript / TypeScript 等语言的书写、提交和继续讨论；当前不提供在线编译或自动判题。
+- **技术方向预设**：提供后端、前端、全栈、算法、嵌入式、DevOps、数据、安全等方向配置，也支持自定义方向。
 - **JD 定制面试**：贴入目标岗位 JD，LLM 自动结构化并调整面试侧重，针对性训练。
 - **可控问题预算**：支持精简 6 题、标准 10 题、深入 15 题三档；标准和深入档包含手撕代码，并可选择引导、标准、压力三种强度。
 - **完整工程化**：JWT 鉴权、SSE 流式、SQLite 持久化、Docker 一键部署、Nginx 反代 + Let's Encrypt 自动续期，生产级开箱即用。
@@ -34,15 +34,7 @@ InterviewLG 是一个面向求职者与面试官训练场景的端到端面试�
 
 ## 功能预览
 
-> 以下截图展示主要功能界面。建议替换为实际运行截图或演示 GIF。
-
-| 面试配置 | 流式对话 |
-|:---:|:---:|
-| ![Setup View](screenshots/setup.png) | ![Chat View](screenshots/chat.png) |
-
-| 手撕代码平台 | 历史回放 |
-|:---:|:---:|
-| ![Coding Workspace](screenshots/coding.png) | ![History View](screenshots/history.png) |
+访问根路径即可浏览问砺的公开产品首页；登录后可进入工作台，完成面试配置、连续问答、代码提交与历史过程回看。公开页面不直接使用包含账号或真实练习内容的工作区截图。
 
 **核心特性一览**：
 

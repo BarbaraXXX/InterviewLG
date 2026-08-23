@@ -99,7 +99,7 @@ async def _lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Interview Agent", lifespan=_lifespan)
+app = FastAPI(title="问砺 Interview API", lifespan=_lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
