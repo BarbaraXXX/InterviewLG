@@ -1,12 +1,12 @@
 {
   "name": "web",
   "private": true,
-  "version": "1.14.0",
+  "version": "1.14.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "node --disable-warning=ExperimentalWarning --test src/mobileNavigation.test.ts src/adminRouting.test.ts src/routes.test.ts src/api.test.ts src/components/brand/brand.test.ts src/components/theme/theme.test.ts src/pages/landing/landingContent.test.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test src/mobileNavigation.test.ts src/adminRouting.test.ts src/routes.test.ts src/api.test.ts src/components/brand/brand.test.ts src/components/theme/theme.test.ts src/pages/landing/landingContent.test.ts src/pages/landing/landingMotion.test.ts",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"*.{js,json}\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"*.{js,json}\"",
     "lint": "eslint .",

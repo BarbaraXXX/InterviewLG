@@ -7,7 +7,7 @@
 连续追问 · 可控问题预算 · 手撕代码 · 完整过程回看
 
 [![CI](https://github.com/BarbaraXXX/InterviewLG/actions/workflows/ci.yml/badge.svg)](https://github.com/BarbaraXXX/InterviewLG/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-v1.14.0-blue)](docs/git-version-history.md)
+[![Version](https://img.shields.io/badge/version-v1.14.1-blue)](docs/git-version-history.md)
 [![Python](https://img.shields.io/badge/Python-3.12+-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Node](https://img.shields.io/badge/Node.js-22.13+-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)

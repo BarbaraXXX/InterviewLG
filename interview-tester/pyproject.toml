@@ -1,6 +1,6 @@
 [project]
 name = "interview-tester"
-version = "1.14.0"
+version = "1.14.1"
 description = "Test agent for interviewing the interview simulation Agent"
 requires-python = ">=3.12"
 dependencies = [
