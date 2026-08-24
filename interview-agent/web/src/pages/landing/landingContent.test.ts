@@ -23,8 +23,7 @@ test('describes question tiers as a count budget with honest coding availability
       { questionCount: 15, includesCoding: true },
     ],
   )
-  assert.match(LANDING_CONTENT.tiersIntro, /问题数/)
-  assert.match(LANDING_CONTENT.tiersIntro, /暂停和思考不会消耗题量/)
+  assert.match(LANDING_CONTENT.workflow.steps[2].description, /问题边界/)
 })
 
 test('keeps current product boundaries explicit', () => {
@@ -38,7 +37,8 @@ test('keeps current product boundaries explicit', () => {
 test('explains optional context and third-party model processing', () => {
   const privacyText = LANDING_CONTENT.privacy.items.map((item) => item.description).join('\n')
 
-  assert.match(LANDING_CONTENT.privacy.description, /简历和 JD 都是可选项/)
+  assert.match(LANDING_CONTENT.privacy.description, /敏感信息/)
+  assert.match(privacyText, /不填写简历/)
   assert.match(privacyText, /模型服务/)
   assert.match(privacyText, /删除/)
   assert.match(privacyText, /点击发送/)
@@ -62,7 +62,9 @@ test('resolves public and authenticated navigation without invented destinations
 test('keeps the landing story in the agreed section order', () => {
   assert.deepEqual(
     LANDING_CONTENT.sections.map((section) => section.id),
-    ['workflow', 'tiers', 'capabilities', 'privacy', 'faq'],
+    ['workflow', 'capabilities', 'privacy', 'faq'],
   )
+  assert.ok(LANDING_CONTENT.navigation.some((item) => item.href === '#tiers'))
+  assert.equal(LANDING_CONTENT.tiers.length, 3)
   assert.equal(LANDING_CONTENT.faq.length, 4)
 })

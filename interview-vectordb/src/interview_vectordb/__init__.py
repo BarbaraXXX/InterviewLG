@@ -1,6 +1,6 @@
 """Interview VectorDB - Face-interview experience vector database with MCP Server."""
 
-__version__ = "1.14.0"
+__version__ = "1.14.1"
 
 from interview_vectordb.schema import InterviewExperience, InterviewProfile
 

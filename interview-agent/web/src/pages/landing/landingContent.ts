@@ -49,7 +49,6 @@ export const LANDING_CONTENT = {
   },
   sections: [
     { id: 'workflow', label: '怎么练' },
-    { id: 'tiers', label: '练习挡位' },
     { id: 'capabilities', label: '核心能力' },
     { id: 'privacy', label: '数据与隐私' },
     { id: 'faq', label: '常见问题' },
@@ -57,7 +56,7 @@ export const LANDING_CONTENT = {
   workflow: {
     eyebrow: '怎么练',
     title: '从目标配置，到一场有边界的模拟',
-    description: '这里不靠倒计时催促你。每场练习按问题数推进，暂停和思考不会消耗题量。',
+    description: '从一个技术方向开始，把目标和上下文带进对话，再沿着每一次回答逐步向深处推进。',
     steps: [
       {
         number: '01',
@@ -67,12 +66,12 @@ export const LANDING_CONTENT = {
       {
         number: '02',
         title: '补充上下文',
-        description: '按需选择纯文本简历、粘贴岗位 JD，或选择已有面试偏好；这些信息都可以跳过。',
+        description: '按需补充与面试相关的项目经历和岗位信息，让后续追问更贴近你的目标。',
       },
       {
         number: '03',
         title: '决定练习节奏',
-        description: '在精简 6 题、标准 10 题、深入 15 题中选择一档，再设置引导、标准或压力型追问。',
+        description: '先确定本场的问题边界，再设置引导、标准或压力型追问。',
       },
       {
         number: '04',
@@ -81,7 +80,6 @@ export const LANDING_CONTENT = {
       },
     ],
   },
-  tiersIntro: '用问题数控制练习边界，而不是用时长衡量表现。暂停和思考不会消耗题量。',
   tiers: [
     {
       name: '精简',
@@ -112,8 +110,8 @@ export const LANDING_CONTENT = {
       eyebrow: '目标上下文',
       title: '围绕你的项目和投递目标追问',
       description:
-        '简历和 JD 都是可选项。提供后，系统会把项目经历、技术栈和岗位要求加入本场上下文；题库存在足够相关的内容时，再作为问题参考。',
-      proof: '不使用简历或 JD 也可以开始。',
+        '提供简历或 JD 后，系统会把项目经历、技术栈和岗位要求加入本场上下文；题库存在足够相关的内容时，再作为问题参考。',
+      proof: '未提供个人上下文时，会按所选技术方向进行通用练习。',
     },
     {
       key: 'strategy',
@@ -156,8 +154,7 @@ export const LANDING_CONTENT = {
   privacy: {
     eyebrow: '数据与隐私',
     title: '你决定提供多少上下文',
-    description:
-      '简历和 JD 都是可选项。简历只需录入与面试相关的项目经验和技能；请不要填写手机号、邮箱、证件号、住址、账号密码、薪资等敏感信息。',
+    description: '只需录入与面试相关的项目经验和技能；请不要填写手机号、邮箱、证件号、住址、账号密码、薪资等敏感信息。',
     items: [
       {
         title: '内容可选',

@@ -1,9 +1,10 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 
 import { BrandMark } from '../../components/brand'
 import { ThemeToggle } from '../../components/theme'
 import styles from './LandingPage.module.css'
 import { LANDING_CONTENT, resolveLandingNavigation, type LandingTheme } from './landingContent'
+import { useLandingReveal } from './landingMotion'
 
 export interface LandingPageProps {
   isAuthenticated?: boolean
@@ -85,19 +86,24 @@ function CheckIcon() {
 }
 
 function SectionHeading({
+  chapter,
   description,
   eyebrow,
   id,
   title,
 }: {
+  chapter: string
   description: string
   eyebrow: string
   id: string
   title: string
 }) {
   return (
-    <header className={styles.sectionHeading}>
-      <p className={styles.eyebrow}>{eyebrow}</p>
+    <header className={styles.sectionHeading} data-reveal>
+      <div className={styles.sectionMeta}>
+        <span>{chapter}</span>
+        <p className={styles.eyebrow}>{eyebrow}</p>
+      </div>
       <h2 id={id}>{title}</h2>
       <p>{description}</p>
     </header>
@@ -107,67 +113,88 @@ function SectionHeading({
 function InterviewPreview() {
   return (
     <figure className={styles.previewFigure} aria-labelledby="landing-preview-caption">
-      <div className={styles.previewHalo} aria-hidden="true" />
       <div className={styles.previewCard}>
         <div className={styles.previewTopbar}>
           <div className={styles.previewBrand}>
             <span className={styles.previewSignal} />
-            <strong>后端开发</strong>
-            <span>/ 校招正式岗</span>
+            <strong>模拟进行中</strong>
+            <span>后端开发 · 校招正式岗</span>
           </div>
           <span className={styles.previewPlan}>标准 · 10 题 · 标准型</span>
         </div>
 
-        <div className={styles.previewProgress}>
-          <div>
-            <span>当前阶段</span>
-            <strong>项目深挖</strong>
+        <div className={styles.previewJourney}>
+          <svg className={styles.previewTrace} viewBox="0 0 620 390" fill="none" aria-hidden="true">
+            <path className={styles.previewTraceBase} d="M72 70C190 70 162 168 292 168S390 286 548 286" />
+            <path
+              className={styles.previewTraceActive}
+              pathLength="1"
+              d="M72 70C190 70 162 168 292 168S390 286 548 286"
+            />
+            <circle cx="72" cy="70" r="6" />
+            <circle cx="292" cy="168" r="6" />
+            <circle cx="548" cy="286" r="6" />
+          </svg>
+
+          <div className={`${styles.journeyCard} ${styles.journeyQuestion}`}>
+            <div className={styles.journeyCardMeta}>
+              <span>01</span>
+              <strong>项目事实</strong>
+            </div>
+            <div className={styles.previewAvatar} aria-hidden="true">
+              <BrandMark variant="compact" size="sm" accessibleLabel="问砺" />
+            </div>
+            <div>
+              <small>AI 面试官</small>
+              <p>你提到使用 Redis 缓存热点数据，为什么选择这个方案？</p>
+            </div>
           </div>
-          <div
-            className={styles.previewProgressTrack}
-            role="progressbar"
-            aria-label="界面示意：已完成 3 / 10 题"
-            aria-valuemin={0}
-            aria-valuemax={10}
-            aria-valuenow={3}
-          >
-            <span style={{ width: '30%' }} />
+
+          <div className={`${styles.journeyCard} ${styles.journeyAnswer}`}>
+            <div className={styles.journeyCardMeta}>
+              <span>02</span>
+              <strong>你的回答</strong>
+            </div>
+            <p>我会先区分热点 Key 和普通 Key，再结合互斥锁与逻辑过期做取舍……</p>
           </div>
-          <strong className={styles.previewProgressCount}>3 / 10</strong>
+
+          <div className={`${styles.journeyCard} ${styles.journeyFollowup}`}>
+            <div className={styles.journeyCardMeta}>
+              <span>03</span>
+              <strong>继续追问</strong>
+            </div>
+            <p>缓存失效的瞬间，怎样保证数据库不被流量压垮？</p>
+            <div className={styles.previewThinking} aria-hidden="true">
+              <i />
+              <i />
+              <i />
+              <span>沿回答继续向深处</span>
+            </div>
+          </div>
         </div>
 
-        <div className={styles.previewBody}>
-          <aside className={styles.previewRail} aria-label="模拟面试阶段示意">
-            <span className={styles.previewRailComplete}>开场</span>
-            <span className={styles.previewRailActive}>项目</span>
-            <span>技术</span>
-            <span>编码</span>
-            <span>总结</span>
-          </aside>
-
-          <div className={styles.previewConversation}>
-            <article className={styles.previewMessage}>
-              <div className={styles.previewAvatar} aria-hidden="true">
-                <BrandMark variant="compact" size="sm" accessibleLabel="问砺" />
-              </div>
-              <div>
-                <span>AI 面试官</span>
-                <p>你提到使用 Redis 缓存热点数据。缓存击穿时，你会怎样保证数据库不被瞬时流量压垮？</p>
-              </div>
-            </article>
-
-            <article className={`${styles.previewMessage} ${styles.previewMessageUser}`}>
-              <div>
-                <span>我的回答</span>
-                <p>我会先区分热点 Key 和普通 Key，再结合互斥锁与逻辑过期来做取舍……</p>
-              </div>
-            </article>
-
-            <div className={styles.previewFocus}>
-              <span>本次重点</span>
+        <div className={styles.previewFooter}>
+          <div className={styles.previewProgress}>
+            <div>
+              <span>当前阶段</span>
               <strong>项目深挖</strong>
-              <strong>系统设计</strong>
             </div>
+            <div
+              className={styles.previewProgressTrack}
+              role="progressbar"
+              aria-label="界面示意：已完成 3 / 10 题"
+              aria-valuemin={0}
+              aria-valuemax={10}
+              aria-valuenow={3}
+            >
+              <span style={{ width: '30%' }} />
+            </div>
+            <strong className={styles.previewProgressCount}>3 / 10</strong>
+          </div>
+          <div className={styles.previewFocus}>
+            <span>本次重点</span>
+            <strong>项目深挖</strong>
+            <strong>系统设计</strong>
           </div>
         </div>
       </div>
@@ -176,14 +203,32 @@ function InterviewPreview() {
   )
 }
 
-function TierVisual({ count }: { count: number }) {
-  const cells = Array.from({ length: count }, (_, index) => index)
+function TierRail() {
   return (
-    <div className={styles.tierVisual} aria-hidden="true">
-      {cells.map((cell) => (
-        <span key={cell} />
-      ))}
-    </div>
+    <section className={styles.tierRail} id="tiers" aria-labelledby="tier-rail-title">
+      <h4 className={styles.visuallyHidden} id="tier-rail-title">
+        练习挡位
+      </h4>
+      <ul>
+        {LANDING_CONTENT.tiers.map((tier) => {
+          const isRecommended = 'badge' in tier
+          return (
+            <li className={isRecommended ? styles.tierRailRecommended : ''} key={tier.name}>
+              <strong>{String(tier.questionCount).padStart(2, '0')}</strong>
+              <div>
+                <span>{tier.name}</span>
+                {isRecommended && <em>{tier.badge}</em>}
+                <p>{tier.description}</p>
+              </div>
+              <small data-enabled={tier.includesCoding}>
+                <CheckIcon />
+                {tier.codingLabel}
+              </small>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
   )
 }
 
@@ -195,11 +240,119 @@ function BoundaryMark({ children }: { children: ReactNode }) {
   )
 }
 
+function ContextFlowVisual() {
+  return (
+    <div className={`${styles.storyVisual} ${styles.contextFlow}`} aria-hidden="true">
+      <div className={styles.contextInputs}>
+        <span>项目经历</span>
+        <span>岗位 JD</span>
+        <span>本轮回答</span>
+      </div>
+      <svg viewBox="0 0 420 210" fill="none">
+        <path d="M68 42C140 42 133 105 213 105M68 105h145M68 168c72 0 65-63 145-63M213 105h128" />
+        <circle cx="213" cy="105" r="6" />
+      </svg>
+      <div className={styles.contextOutput}>
+        <small>下一次追问</small>
+        <strong>这个选择解决了什么问题？</strong>
+      </div>
+    </div>
+  )
+}
+
+function StrategyScaleVisual() {
+  return (
+    <div className={`${styles.storyVisual} ${styles.strategyScale}`} aria-hidden="true">
+      <div className={styles.strategyLabels}>
+        <span>引导型</span>
+        <strong>标准型</strong>
+        <span>压力型</span>
+      </div>
+      <div className={styles.strategyTrack}>
+        <i />
+        <i />
+        <i />
+      </div>
+      <div className={styles.strategyFocus}>
+        <small>最多两个训练重点</small>
+        <span>项目深挖</span>
+        <span>系统设计</span>
+      </div>
+    </div>
+  )
+}
+
+function CodingStageVisual() {
+  return (
+    <div className={`${styles.storyVisual} ${styles.codingStage}`} aria-hidden="true">
+      <div className={styles.codingTopbar}>
+        <span>
+          <i />
+          <i />
+          <i />
+        </span>
+        <strong>Python</strong>
+        <small>草稿已保存</small>
+      </div>
+      <pre>
+        <code>
+          <span>def</span> protect_cache(key):{`\n`} lock = acquire(key){`\n`} <span>if</span> lock:{`\n`}{' '}
+          <span>return</span> rebuild(key)
+        </code>
+      </pre>
+      <div className={styles.codingActions}>
+        <span>保存草稿</span>
+        <strong>提交并讲解</strong>
+      </div>
+    </div>
+  )
+}
+
+function HistoryThreadVisual() {
+  return (
+    <div className={`${styles.storyVisual} ${styles.historyThread}`} aria-hidden="true">
+      <ol>
+        <li>
+          <span>Q1</span>
+          <div>
+            <strong>项目背景</strong>
+            <small>完整问答已保存</small>
+          </div>
+        </li>
+        <li>
+          <span>Q2</span>
+          <div>
+            <strong>技术取舍</strong>
+            <small>沿上一次回答继续</small>
+          </div>
+        </li>
+        <li>
+          <span>Code</span>
+          <div>
+            <strong>代码表达</strong>
+            <small>草稿与提交均可回看</small>
+          </div>
+        </li>
+      </ol>
+      <p>中断的练习可以稍后继续</p>
+    </div>
+  )
+}
+
+function CapabilityVisual({ featureKey }: { featureKey: string }) {
+  if (featureKey === 'context') return <ContextFlowVisual />
+  if (featureKey === 'strategy') return <StrategyScaleVisual />
+  if (featureKey === 'coding') return <CodingStageVisual />
+  return <HistoryThreadVisual />
+}
+
 export function LandingPage({ isAuthenticated = false, theme = 'dark', onThemeToggle, appVersion }: LandingPageProps) {
   const navigation = resolveLandingNavigation(isAuthenticated)
+  const pageRef = useRef<HTMLDivElement>(null)
+  useLandingReveal(pageRef)
 
   return (
-    <div className={styles.page} data-theme={theme}>
+    <div ref={pageRef} className={styles.page} data-theme={theme}>
       <a className={styles.skipLink} href="#landing-main">
         跳到主要内容
       </a>
@@ -239,6 +392,7 @@ export function LandingPage({ isAuthenticated = false, theme = 'dark', onThemeTo
             <span />
             <span />
             <span />
+            <span />
           </div>
 
           <div className={styles.heroCopy}>
@@ -246,7 +400,13 @@ export function LandingPage({ isAuthenticated = false, theme = 'dark', onThemeTo
               <span aria-hidden="true" />
               {LANDING_CONTENT.hero.eyebrow}
             </p>
-            <h1 id="landing-hero-title">{LANDING_CONTENT.hero.title}</h1>
+            <h1 id="landing-hero-title" aria-label={LANDING_CONTENT.hero.title}>
+              <span>把掌握的知识，</span>
+              <span>练成面试现场</span>
+              <span>
+                <em>能说清楚</em>的回答
+              </span>
+            </h1>
             <p className={styles.heroDescription}>{LANDING_CONTENT.hero.description}</p>
             <div className={styles.heroActions}>
               <a className={styles.primaryCta} href={navigation.primaryHref}>
@@ -261,154 +421,136 @@ export function LandingPage({ isAuthenticated = false, theme = 'dark', onThemeTo
           </div>
 
           <InterviewPreview />
+
+          <a className={styles.heroScrollCue} href="#workflow">
+            <span>看一场练习如何展开</span>
+            <i aria-hidden="true" />
+          </a>
         </section>
 
         <section className={styles.workflowSection} id="workflow" aria-labelledby="workflow-title">
-          <SectionHeading
-            eyebrow={LANDING_CONTENT.workflow.eyebrow}
-            id="workflow-title"
-            title={LANDING_CONTENT.workflow.title}
-            description={LANDING_CONTENT.workflow.description}
-          />
-          <div className={styles.workflowGrid}>
-            {LANDING_CONTENT.workflow.steps.map((step) => (
-              <article className={styles.workflowCard} key={step.number}>
-                <span className={styles.workflowNumber}>{step.number}</span>
-                <div>
+          <div className={styles.workflowChapter}>
+            <SectionHeading
+              chapter="01"
+              eyebrow={LANDING_CONTENT.workflow.eyebrow}
+              id="workflow-title"
+              title={LANDING_CONTENT.workflow.title}
+              description={LANDING_CONTENT.workflow.description}
+            />
+            <aside className={styles.workflowStatement} data-reveal>
+              <span>练习边界</span>
+              <strong>给思考留出空间，给追问划清边界。</strong>
+              <p>用问题数推进，而不是用倒计时衡量表现。</p>
+            </aside>
+          </div>
+          <ol className={styles.journeyTimeline}>
+            {LANDING_CONTENT.workflow.steps.map((step, index) => (
+              <li key={step.number} data-reveal data-reveal-index={index}>
+                <span className={styles.journeyNumber}>{step.number}</span>
+                <div className={styles.journeyCopy}>
                   <h3>{step.title}</h3>
                   <p>{step.description}</p>
+                  {index === 2 && <TierRail />}
                 </div>
-              </article>
+              </li>
             ))}
-          </div>
-        </section>
-
-        <section className={styles.tierSection} id="tiers" aria-labelledby="tier-title">
-          <header className={styles.tierHeading}>
-            <div>
-              <p className={styles.eyebrow}>练习挡位</p>
-              <h2 id="tier-title">不用时长衡量一场模拟</h2>
-            </div>
-            <p>{LANDING_CONTENT.tiersIntro}</p>
-          </header>
-
-          <div className={styles.tierGrid}>
-            {LANDING_CONTENT.tiers.map((tier) => {
-              const isRecommended = 'badge' in tier
-              return (
-                <article
-                  className={`${styles.tierCard} ${isRecommended ? styles.tierRecommended : ''}`}
-                  key={tier.name}
-                >
-                  <div className={styles.tierCardTop}>
-                    <div>
-                      <span>{tier.name}</span>
-                      <strong>
-                        {tier.questionCount}
-                        <small>题</small>
-                      </strong>
-                    </div>
-                    {isRecommended && <em>{tier.badge}</em>}
-                  </div>
-                  <TierVisual count={tier.questionCount} />
-                  <p>{tier.description}</p>
-                  <div className={styles.tierCoding} data-enabled={tier.includesCoding}>
-                    <CheckIcon />
-                    <span>{tier.codingLabel}</span>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
+          </ol>
         </section>
 
         <section className={styles.capabilitiesSection} id="capabilities" aria-labelledby="capabilities-title">
           <SectionHeading
+            chapter="02"
             eyebrow="核心能力"
             id="capabilities-title"
-            title="让每一个问题，都服务于这场练习"
-            description="问题从你的目标出发，在明确的节奏内向深处追问，最后留下可以回看的完整过程。"
+            title="问题如何变成一次真实练习"
+            description="从目标上下文到连续追问、代码表达与完整回看，每一段都有不同的作用。"
           />
 
-          <div className={styles.capabilityGrid}>
-            {LANDING_CONTENT.capabilities.map((capability, index) => (
-              <article
-                className={`${styles.capabilityCard} ${index === 0 || index === 3 ? styles.capabilityWide : ''}`}
-                key={capability.key}
-              >
-                <div className={styles.capabilityIcon}>
-                  <FeatureIcon featureKey={capability.key} />
-                </div>
-                <p className={styles.cardEyebrow}>{capability.eyebrow}</p>
-                <h3>{capability.title}</h3>
-                <p>{capability.description}</p>
-                <span className={styles.capabilityProof}>{capability.proof}</span>
-              </article>
-            ))}
+          <div className={styles.storyActs}>
+            {LANDING_CONTENT.capabilities.map((capability, index) => {
+              const scopeBoundary =
+                capability.key === 'coding'
+                  ? LANDING_CONTENT.boundaries[0]
+                  : capability.key === 'history'
+                    ? LANDING_CONTENT.boundaries[1]
+                    : null
+              return (
+                <article
+                  className={`${styles.storyAct} ${index % 2 === 1 ? styles.storyActReverse : ''}`}
+                  key={capability.key}
+                  data-reveal
+                >
+                  <div className={styles.storyCopy}>
+                    <div className={styles.storyIcon}>
+                      <FeatureIcon featureKey={capability.key} />
+                    </div>
+                    <p className={styles.cardEyebrow}>{capability.eyebrow}</p>
+                    <h3>{capability.title}</h3>
+                    <p>{capability.description}</p>
+                    <span className={styles.storyProof}>{capability.proof}</span>
+                    {scopeBoundary && (
+                      <aside className={styles.scopeNote}>
+                        <BoundaryMark>边界</BoundaryMark>
+                        <div>
+                          <strong>{scopeBoundary.title}</strong>
+                          <p>{scopeBoundary.description}</p>
+                        </div>
+                      </aside>
+                    )}
+                  </div>
+                  <CapabilityVisual featureKey={capability.key} />
+                </article>
+              )
+            })}
           </div>
 
-          <div className={styles.boundaryPanel}>
-            <header>
-              <p className={styles.eyebrow}>真实边界</p>
-              <h2>说清楚现在能做什么，也说清楚还不能做什么</h2>
-            </header>
-            <div className={styles.boundaryGrid}>
-              {LANDING_CONTENT.boundaries.map((boundary, index) => (
-                <article key={boundary.title}>
-                  <BoundaryMark>{String(index + 1).padStart(2, '0')}</BoundaryMark>
-                  <div>
-                    <h3>{boundary.title}</h3>
-                    <p>{boundary.description}</p>
-                  </div>
-                </article>
-              ))}
+          <aside className={styles.aiDisclaimer} data-reveal>
+            <BoundaryMark>AI</BoundaryMark>
+            <div>
+              <strong>{LANDING_CONTENT.boundaries[2].title}</strong>
+              <p>{LANDING_CONTENT.boundaries[2].description}</p>
             </div>
-          </div>
+          </aside>
         </section>
 
         <section className={styles.privacySection} id="privacy" aria-labelledby="privacy-title">
-          <div className={styles.privacyIntro}>
-            <p className={styles.privacyEyebrow}>{LANDING_CONTENT.privacy.eyebrow}</p>
+          <div className={styles.privacyIntro} data-reveal>
+            <div className={styles.sectionMeta}>
+              <span>03</span>
+              <p className={styles.privacyEyebrow}>{LANDING_CONTENT.privacy.eyebrow}</p>
+            </div>
             <h2 id="privacy-title">{LANDING_CONTENT.privacy.title}</h2>
             <p>{LANDING_CONTENT.privacy.description}</p>
-            <div className={styles.privacyVisual} aria-hidden="true">
-              <div className={styles.privacyOrbit}>
-                <span />
-                <span />
-                <span />
-              </div>
-              <svg viewBox="0 0 64 64" fill="none">
-                <path
-                  d="M32 5 53 13v16c0 14-8.5 24.5-21 30C19.5 53.5 11 43 11 29V13l21-8Z"
-                  stroke="currentColor"
-                  strokeWidth="2.4"
-                />
-                <rect x="23" y="28" width="18" height="14" rx="4" stroke="currentColor" strokeWidth="2.4" />
-                <path d="M27 28v-4a5 5 0 0 1 10 0v4" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-                <circle cx="32" cy="35" r="1.8" fill="currentColor" />
-              </svg>
-            </div>
+            <svg className={styles.privacyShield} viewBox="0 0 64 64" fill="none" aria-hidden="true">
+              <path d="M32 5 53 13v16c0 14-8.5 24.5-21 30C19.5 53.5 11 43 11 29V13l21-8Z" />
+              <path d="M23 32h18M27 32v-7a5 5 0 0 1 10 0v7M32 39v4" />
+            </svg>
           </div>
 
-          <div className={styles.privacyGrid}>
+          <dl className={styles.privacyList}>
             {LANDING_CONTENT.privacy.items.map((item, index) => (
-              <article key={item.title}>
-                <span>{String(index + 1).padStart(2, '0')}</span>
-                <h3>{item.title}</h3>
-                <p>{item.description}</p>
-              </article>
+              <div key={item.title} data-reveal data-reveal-index={index}>
+                <dt>
+                  <span>{String(index + 1).padStart(2, '0')}</span>
+                  <strong>{item.title}</strong>
+                </dt>
+                <dd>{item.description}</dd>
+              </div>
             ))}
-          </div>
+          </dl>
         </section>
 
         <section className={styles.faqSection} id="faq" aria-labelledby="faq-title">
-          <header className={styles.faqHeading}>
-            <p className={styles.eyebrow}>常见问题</p>
+          <header className={styles.faqHeading} data-reveal>
+            <div className={styles.sectionMeta}>
+              <span>04</span>
+              <p className={styles.eyebrow}>常见问题</p>
+            </div>
             <h2 id="faq-title">开始前，你可能还想知道</h2>
           </header>
           <div className={styles.faqList}>
             {LANDING_CONTENT.faq.map((item, index) => (
-              <details key={item.question} open={index === 0}>
+              <details key={item.question} open={index === 0} data-reveal data-reveal-index={index}>
                 <summary>
                   <span>{item.question}</span>
                   <i aria-hidden="true" />
@@ -419,8 +561,13 @@ export function LandingPage({ isAuthenticated = false, theme = 'dark', onThemeTo
           </div>
         </section>
 
-        <section className={styles.closingSection} aria-labelledby="closing-title">
-          <div className={styles.closingPattern} aria-hidden="true" />
+        <section className={styles.closingSection} aria-labelledby="closing-title" data-reveal>
+          <svg className={styles.closingTrace} viewBox="0 0 520 220" fill="none" aria-hidden="true">
+            <path d="M18 172C128 172 92 48 228 48s104 124 274 124" />
+            <circle cx="18" cy="172" r="5" />
+            <circle cx="228" cy="48" r="5" />
+            <circle cx="502" cy="172" r="5" />
+          </svg>
           <div>
             <p className={styles.closingEyebrow}>{LANDING_CONTENT.closing.eyebrow}</p>
             <h2 id="closing-title">{LANDING_CONTENT.closing.title}</h2>
